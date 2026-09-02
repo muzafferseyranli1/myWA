@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.baileys_auth/
+public/uploads/*
+!public/uploads/.gitkeep
+.env
+*.log
+dist/

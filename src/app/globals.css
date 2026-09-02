@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom scrollbar for WhatsApp feel */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4B5563; }
+
+body { background: #111B21; color: #E9EDEF; }
+
+/* Chat bubble tails */
+.bubble-out::before { content: ''; position: absolute; top: 0; right: -8px; width: 0; height: 0; border-left: 8px solid #005C4B; border-bottom: 8px solid transparent; }
+.bubble-in::before { content: ''; position: absolute; top: 0; left: -8px; width: 0; height: 0; border-right: 8px solid #202C33; border-bottom: 8px solid transparent; }

@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  mywa-db:
+    image: postgres:16-alpine
+    container_name: mywa-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mywa
+      POSTGRES_USER: mywa
+      POSTGRES_PASSWORD: MyWA_Secure_2026!
+    ports:
+      - "5433:5432"
+    volumes:
+      - mywa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mywa -d mywa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mywa-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mywa-app
+    restart: unless-stopped
+    ports:
+      - "3060:3060"
+    environment:
+      NODE_ENV: production
+      PORT: 3060
+      DATABASE_URL: postgresql://mywa:MyWA_Secure_2026!@mywa-db:5432/mywa
+      JWT_SECRET: mywa_jwt_production_secret_2026_change_me
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin123
+      WA_SESSION_PATH: /app/.baileys_auth
+      UPLOAD_DIR: /app/public/uploads
+      MAX_FILE_SIZE: 50
+    volumes:
+      - mywa_uploads:/app/public/uploads
+      - mywa_auth:/app/.baileys_auth
+    depends_on:
+      mywa-db:
+        condition: service_healthy
+
+volumes:
+  mywa_pgdata:
+    driver: local
+  mywa_uploads:
+    driver: local
+  mywa_auth:
+    driver: local
