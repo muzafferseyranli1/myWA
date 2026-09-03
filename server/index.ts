@@ -81,6 +81,10 @@ app.prepare().then(() => {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`> MyWA Server listening on http://0.0.0.0:${PORT}`);
+    // Auto initialize WhatsApp service on boot
+    whatsappService.initialize().catch((err) => {
+      console.error('WhatsApp auto-init error:', err);
+    });
   });
 }).catch((ex) => {
   console.error('Server startup error:', ex.stack || ex);

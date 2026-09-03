@@ -27,6 +27,9 @@ export const setupSockets = (io: Server) => {
   io.on('connection', (socket: Socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
+    // Emit current WhatsApp status & QR immediately upon connection
+    socket.emit('whatsapp_status', whatsappService.getStatus());
+
     socket.on('join_chat', (chatId: string) => {
       socket.join(`chat_${chatId}`);
     });
@@ -38,11 +41,7 @@ export const setupSockets = (io: Server) => {
     socket.on('send_message', async (data: { chatId: string, text: string }) => {
       try {
         const { chatId, text } = data;
-        const result = await whatsappService.sendMessage(chatId, text);
-        
-        // WhatsApp doesn't send a full message object back immediately for our own messages in the same way,
-        // but Baileys might emit it in messages.upsert.
-        // If needed, we can proactively save it here, but typically it's better to wait for messages.upsert to handle it.
+        await whatsappService.sendMessage(chatId, text);
       } catch (error) {
         console.error('Send message error:', error);
         socket.emit('error', 'Failed to send message');

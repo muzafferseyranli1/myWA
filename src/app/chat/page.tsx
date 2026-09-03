@@ -49,14 +49,23 @@ export default function ChatDashboard() {
     sock.connect();
 
     const onStatus = (data: any) => {
-      if (typeof data === 'string') setWaStatus(data as any);
-      else if (data?.status) setWaStatus(data.status);
+      if (typeof data === 'string') {
+        setWaStatus(data as any);
+      } else if (data && typeof data === 'object') {
+        if (data.status) setWaStatus(data.status);
+        if (data.qr) {
+          setQrCode(data.qr);
+          setWaStatus('qr');
+        }
+      }
     };
 
     const onQR = (data: any) => {
       const qrVal = typeof data === 'string' ? data : data?.qr || data?.qrCode || '';
-      setQrCode(qrVal);
-      setWaStatus('qr');
+      if (qrVal) {
+        setQrCode(qrVal);
+        setWaStatus('qr');
+      }
     };
 
     const onNewMsg = (msg: any) => {
@@ -83,6 +92,7 @@ export default function ChatDashboard() {
     sock.on('task_deleted', onTaskDeleted);
 
     fetchChats();
+    fetchWaStatus();
 
     return () => {
       sock.off('whatsapp_status', onStatus);
@@ -93,6 +103,22 @@ export default function ChatDashboard() {
       sock.off('task_deleted', onTaskDeleted);
     };
   }, [router]);
+
+  const fetchWaStatus = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/status', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status) setWaStatus(data.status);
+        if (data.qr) {
+          setQrCode(data.qr);
+          setWaStatus('qr');
+        }
+      }
+    } catch (e) {}
+  };
 
   const fetchChats = async () => {
     try {
