@@ -1,42 +1,30 @@
-FROM node:20-alpine AS base
-RUN apk add --no-cache openssl
+FROM node:20-alpine
+
+RUN apk add --no-cache openssl libc6-compat
+
 WORKDIR /app
 
-# Install dependencies
-FROM base AS deps
-COPY package.json package-lock.json* ./
-RUN npm ci
+# Build and runtime environment variables
+ENV NODE_ENV=production
+ENV PORT=3060
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_URL="postgresql://mywa:MyWA_Secure_2026!@localhost:5432/mywa"
 
-# Build the application
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
+# Copy manifests
+COPY package.json package-lock.json* ./
+
+# Install dependencies
+RUN npm install
+
+# Copy all source files
 COPY . .
+
+# Generate Prisma client and build Next.js
 RUN npx prisma generate
 RUN npm run build
 
-# Production runner
-FROM base AS runner
-ENV NODE_ENV=production
-ENV PORT=3060
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 mywa
-
-# Copy built app
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/server ./server
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/src/lib ./src/lib
-
-# Create directories for persistent data
+# Ensure runtime directories exist
 RUN mkdir -p /app/.baileys_auth /app/public/uploads
-RUN chown -R mywa:nodejs /app/.baileys_auth /app/public/uploads /app
-
-USER mywa
 
 EXPOSE 3060
 
