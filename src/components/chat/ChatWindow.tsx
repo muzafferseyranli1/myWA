@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Send, Image as ImageIcon, FileText } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import CreateTaskModal from '../task/CreateTaskModal';
+import { getSocket } from '../../lib/socket';
 
 interface ChatWindowProps {
   chatId: string;
@@ -17,12 +18,16 @@ export default function ChatWindow({ chatId, messages, onCreateTask }: ChatWindo
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [selectedMsgForTask, setSelectedMsgForTask] = useState<any>(null);
 
+  const msgList = Array.isArray(messages) ? messages : [];
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [msgList]);
 
   const handleSend = () => {
     if (!input.trim()) return;
+    const sock = getSocket();
+    sock.emit('send_message', { chatId, text: input });
     setInput('');
   };
 
@@ -38,17 +43,21 @@ export default function ChatWindow({ chatId, messages, onCreateTask }: ChatWindo
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {messages.map((msg) => {
-          return (
-            <div key={msg.id} className="flex flex-col">
+        {msgList.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm text-[#8696A0]">
+            Bu sohbette henüz mesaj bulunmuyor.
+          </div>
+        ) : (
+          msgList.map((msg: any, idx: number) => (
+            <div key={msg?.id || idx} className="flex flex-col">
               <MessageBubble 
                 message={msg} 
-                isOwn={msg.isFromMe} 
+                isOwn={!!msg?.isFromMe} 
                 onCreateTask={() => handleContextMenuTask(msg)} 
               />
             </div>
-          );
-        })}
+          ))
+        )}
         <div ref={endRef} />
       </div>
 
@@ -61,7 +70,7 @@ export default function ChatWindow({ chatId, messages, onCreateTask }: ChatWindo
           placeholder="Bir mesaj yazın"
           className="flex-1 rounded-lg bg-[#2A3942] px-4 py-2 text-[#E9EDEF] placeholder-[#8696A0] focus:outline-none"
         />
-        <button onClick={handleSend} className="p-2 text-[#8696A0] hover:text-[#E9EDEF]">
+        <button onClick={handleSend} className="p-2 text-[#8696A0] hover:text-[#E9EDEF] cursor-pointer">
           <Send className="h-6 w-6" />
         </button>
       </div>

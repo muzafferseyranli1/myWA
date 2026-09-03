@@ -5,6 +5,8 @@ import { Boom } from '@hapi/boom';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
+import { prisma } from '../../src/lib/prisma';
+import { messageService } from './message.service';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -103,6 +105,72 @@ export class WhatsAppService {
           this.qrcodeDataUrl = null;
           this.isInitializing = false;
           if (this.onStatus) this.onStatus(this.status);
+        }
+      });
+
+      // Sync chat history
+      this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }: any) => {
+        console.log(`> Syncing messaging history: ${chats?.length || 0} chats, ${messages?.length || 0} messages`);
+        if (chats) {
+          for (const c of chats) {
+            if (c.id) {
+              await prisma.chat.upsert({
+                where: { id: c.id },
+                update: {
+                  name: c.name || c.id,
+                  isGroup: c.id.endsWith('@g.us'),
+                  updatedAt: new Date()
+                },
+                create: {
+                  id: c.id,
+                  name: c.name || c.id,
+                  isGroup: c.id.endsWith('@g.us'),
+                  updatedAt: new Date()
+                }
+              }).catch(() => {});
+            }
+          }
+        }
+        if (messages) {
+          for (const msg of messages) {
+            if (!msg.message || !msg.key?.remoteJid) continue;
+            const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
+            const parsed = {
+              id: msg.key.id,
+              chatId: msg.key.remoteJid,
+              chatName: msg.pushName || msg.key.remoteJid,
+              isGroup: msg.key.remoteJid?.endsWith('@g.us'),
+              senderId: msg.key.participant || msg.key.remoteJid,
+              senderPhone: (msg.key.participant || msg.key.remoteJid)?.split('@')[0],
+              senderName: msg.pushName,
+              body: text,
+              messageType: 'TEXT',
+              isFromMe: !!msg.key.fromMe,
+              timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
+            };
+            await messageService.saveMessage(parsed).catch(() => {});
+          }
+        }
+      });
+
+      this.sock.ev.on('chats.upsert', async (newChats: any[]) => {
+        for (const c of newChats) {
+          if (c.id) {
+            await prisma.chat.upsert({
+              where: { id: c.id },
+              update: {
+                name: c.name || c.id,
+                isGroup: c.id.endsWith('@g.us'),
+                updatedAt: new Date()
+              },
+              create: {
+                id: c.id,
+                name: c.name || c.id,
+                isGroup: c.id.endsWith('@g.us'),
+                updatedAt: new Date()
+              }
+            }).catch(() => {});
+          }
         }
       });
 

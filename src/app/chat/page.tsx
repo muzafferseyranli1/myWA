@@ -132,17 +132,25 @@ export default function ChatDashboard() {
   const fetchMessagesAndTasks = async (chatId: string) => {
     try {
       const [msgRes, taskRes] = await Promise.all([
-        fetch(`/api/chats/${chatId}/messages`, {
+        fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
         }),
-        fetch(`/api/chats/${chatId}/tasks`, {
+        fetch(`/api/chats/${encodeURIComponent(chatId)}/tasks`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
         })
       ]);
       
-      if (msgRes.ok) setMessages(await msgRes.json());
-      if (taskRes.ok) setTasks(await taskRes.json());
-    } catch (e) {}
+      if (msgRes.ok) {
+        const msgData = await msgRes.json();
+        setMessages(Array.isArray(msgData) ? msgData : msgData.messages || []);
+      }
+      if (taskRes.ok) {
+        const taskData = await taskRes.json();
+        setTasks(Array.isArray(taskData) ? taskData : []);
+      }
+    } catch (e) {
+      console.error('fetchMessagesAndTasks error:', e);
+    }
   };
 
   const handleSelectChat = (chatId: string) => {
