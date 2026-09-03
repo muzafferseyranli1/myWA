@@ -30,6 +30,11 @@ app.prepare().then(() => {
     }
   });
 
+  // Health check endpoint
+  server.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
   // CORS middleware
   server.use((req, res, nextFn) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -74,10 +79,10 @@ app.prepare().then(() => {
     return handle(req, res);
   });
 
-  httpServer.listen(PORT, () => {
-    console.log(`> Server listening on http://localhost:${PORT}`);
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`> MyWA Server listening on http://0.0.0.0:${PORT}`);
   });
 }).catch((ex) => {
-  console.error(ex.stack);
+  console.error('Server startup error:', ex.stack || ex);
   process.exit(1);
 });
