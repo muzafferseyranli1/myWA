@@ -1,11 +1,8 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'] });
-
 export const metadata: Metadata = {
-  title: 'MyWA',
+  title: 'MyWA — WhatsApp Görev Yönetim Platformu',
   description: 'WhatsApp-integrated Task Management Platform',
 };
 
@@ -16,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="tr">
-      <body className={`${inter.className} bg-[#111B21] text-[#E9EDEF]`}>
+      <body className="bg-[#111B21] text-[#E9EDEF] font-sans antialiased">
         {children}
       </body>
     </html>
