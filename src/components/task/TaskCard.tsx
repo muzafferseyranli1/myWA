@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@/lib/utils';
+import { cn } from '../../lib/utils';
 import ReminderButton from './ReminderButton';
 
 export default function TaskCard({ task, onEdit, onRemind }: { task: any, onEdit: () => void, onRemind: () => void }) {

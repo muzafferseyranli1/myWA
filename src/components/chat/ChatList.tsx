@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Search, Users } from 'lucide-react';
-import { cn, formatTime } from '@/lib/utils';
+import { cn, formatTime } from '../../lib/utils';
 
 interface ChatListProps {
   chats: any[];

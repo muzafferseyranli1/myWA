@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import ChatList from '@/components/chat/ChatList';
-import ChatWindow from '@/components/chat/ChatWindow';
-import TaskSidebar from '@/components/task/TaskSidebar';
-import KanbanBoard from '@/components/task/KanbanBoard';
-import QRConnectModal from '@/components/whatsapp/QRConnectModal';
-import ReminderButton from '@/components/task/ReminderButton';
-import { getSocket } from '@/lib/socket';
+import ChatList from '../../components/chat/ChatList';
+import ChatWindow from '../../components/chat/ChatWindow';
+import TaskSidebar from '../../components/task/TaskSidebar';
+import KanbanBoard from '../../components/task/KanbanBoard';
+import QRConnectModal from '../../components/whatsapp/QRConnectModal';
+import ReminderButton from '../../components/task/ReminderButton';
+import { getSocket } from '../../lib/socket';
 import { LogOut, Smartphone, CheckCircle, Clock } from 'lucide-react';
 
 export default function ChatDashboard() {
