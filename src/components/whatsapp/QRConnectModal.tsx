@@ -35,7 +35,14 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isOpen, localStatus, localQr]);
+  useEffect(() => {
+    if (localStatus === 'connected' || localStatus === 'ready' || status === 'connected' || status === 'ready') {
+      const timer = setTimeout(() => {
+        if (onClose) onClose();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [localStatus, status, onClose]);
 
   if (!isOpen) return null;
 

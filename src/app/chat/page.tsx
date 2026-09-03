@@ -193,10 +193,10 @@ export default function ChatDashboard() {
             onClick={() => setIsQrModalOpen(true)}
             className="flex items-center space-x-2 rounded-md border border-[#222E35] bg-[#2A3942] px-3 py-1.5 hover:bg-[#374151]"
           >
-            <div className={`h-2.5 w-2.5 rounded-full ${waStatus === 'ready' ? 'bg-green-500' : waStatus === 'connecting' || waStatus === 'qr' || waStatus === 'authenticated' ? 'bg-yellow-500' : 'bg-red-500'}`} />
+            <div className={`h-2.5 w-2.5 rounded-full ${waStatus === 'connected' || waStatus === 'ready' ? 'bg-green-500' : waStatus === 'connecting' || waStatus === 'qr' || waStatus === 'authenticated' ? 'bg-yellow-500' : 'bg-red-500'}`} />
             <Smartphone className="h-4 w-4 text-[#8696A0]" />
             <span className="text-sm font-medium text-[#E9EDEF]">
-              {waStatus === 'ready' ? 'Bağlı' : waStatus === 'disconnected' ? 'Bağlan' : 'Bağlanıyor...'}
+              {waStatus === 'connected' || waStatus === 'ready' ? 'Bağlandı' : waStatus === 'disconnected' ? 'Bağlan' : 'Bağlanıyor...'}
             </span>
           </button>
           
