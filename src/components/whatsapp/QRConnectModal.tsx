@@ -35,6 +35,8 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
     return () => {
       if (interval) clearInterval(interval);
     };
+  }, [isOpen, localStatus, localQr]);
+
   useEffect(() => {
     if (localStatus === 'connected' || localStatus === 'ready' || status === 'connected' || status === 'ready') {
       const timer = setTimeout(() => {
@@ -54,7 +56,6 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
       });
-      // Immediately check status
       const res = await fetch('/api/whatsapp/status', {
         headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
       });
