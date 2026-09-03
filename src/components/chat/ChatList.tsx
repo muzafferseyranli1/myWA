@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from 'react';
 import { Search, Users } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';

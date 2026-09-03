@@ -1,25 +1,56 @@
+'use client';
+
 import { useState } from 'react';
 import { X, Trash2 } from 'lucide-react';
 
 export default function EditTaskModal({ isOpen, onClose, task, contacts }: any) {
-  const [title, setTitle] = useState(task.title || '');
-  const [status, setStatus] = useState(task.status || 'TODO');
+  const [title, setTitle] = useState(task?.title || '');
+  const [status, setStatus] = useState(task?.status || 'TODO');
+  const [priority, setPriority] = useState(task?.priority || 'MEDIUM');
   const [loading, setLoading] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !task) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('mywa_token')}`
+        },
+        body: JSON.stringify({
+          title,
+          status,
+          priority
+        })
+      });
+      if (res.ok) {
+        onClose();
+      }
+    } catch (err) {
+      console.error('Failed to update task:', err);
+    } finally {
       setLoading(false);
-      onClose();
-    }, 500);
+    }
   };
 
-  const handleDelete = () => {
-    if (confirm('Görevi silmek istediğinize emin misiniz?')) {
-      onClose();
+  const handleDelete = async () => {
+    if (!confirm('Görevi silmek istediğinize emin misiniz?')) return;
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('mywa_token')}`
+        }
+      });
+      if (res.ok) {
+        onClose();
+      }
+    } catch (err) {
+      console.error('Failed to delete task:', err);
     }
   };
 
@@ -39,13 +70,25 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts }: any) 
             <input required value={title} onChange={e => setTitle(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
           </div>
           
-          <div>
-            <label className="mb-1 block text-sm text-[#8696A0]">Durum</label>
-            <select value={status} onChange={e => setStatus(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
-              <option value="TODO">Yapılacak</option>
-              <option value="IN_PROGRESS">Devam Ediyor</option>
-              <option value="DONE">Tamamlandı</option>
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-sm text-[#8696A0]">Durum</label>
+              <select value={status} onChange={e => setStatus(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
+                <option value="TODO">Yapılacak</option>
+                <option value="IN_PROGRESS">Devam Ediyor</option>
+                <option value="DONE">Tamamlandı</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-[#8696A0]">Öncelik</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
+                <option value="LOW">Düşük</option>
+                <option value="MEDIUM">Orta</option>
+                <option value="HIGH">Yüksek</option>
+                <option value="URGENT">Acil</option>
+              </select>
+            </div>
           </div>
 
           <div className="flex justify-between pt-4 border-t border-[#222E35]">

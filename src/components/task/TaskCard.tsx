@@ -1,4 +1,5 @@
-import { Bell } from 'lucide-react';
+'use client';
+
 import { cn } from '@/lib/utils';
 import ReminderButton from './ReminderButton';
 
@@ -31,15 +32,18 @@ export default function TaskCard({ task, onEdit, onRemind }: { task: any, onEdit
       <div className="mt-3 flex items-center justify-between text-xs">
         <div className="flex items-center space-x-2">
           <span className="rounded bg-[#2A3942] px-2 py-0.5 text-[#8696A0]">{task.priority}</span>
-          {task.dueDate && <span className="text-[#8696A0]">⏱️ {new Date(task.dueDate).toLocaleDateString()}</span>}
+          {task.dueDate && <span className="text-[#8696A0]">⏱️ {new Date(task.dueDate).toLocaleDateString('tr-TR')}</span>}
         </div>
         
         <div className="flex space-x-1">
-          {task.assignees?.map((a: any, i: number) => (
-            <div key={i} className="h-5 w-5 rounded-full bg-[#6B7C85] text-[10px] flex items-center justify-center text-white border border-[#202C33]">
-              {a.name.substring(0, 2).toUpperCase()}
-            </div>
-          ))}
+          {task.assignees?.map((a: any, i: number) => {
+            const name = a.contact?.displayName || a.contact?.pushName || a.contact?.phoneNumber || 'K';
+            return (
+              <div key={i} className="h-5 w-5 rounded-full bg-[#6B7C85] text-[10px] flex items-center justify-center text-white border border-[#202C33]">
+                {name.substring(0, 2).toUpperCase()}
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -1,3 +1,5 @@
+'use client';
+
 import { Plus } from 'lucide-react';
 import TaskCard from './TaskCard';
 import { useState } from 'react';

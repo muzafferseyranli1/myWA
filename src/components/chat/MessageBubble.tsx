@@ -1,3 +1,5 @@
+'use client';
+
 import { cn, formatTime } from '@/lib/utils';
 
 export default function MessageBubble({ message, isOwn, onCreateTask }: { message: any, isOwn: boolean, onCreateTask: () => void }) {

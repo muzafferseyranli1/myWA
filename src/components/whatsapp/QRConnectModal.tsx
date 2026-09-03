@@ -1,7 +1,20 @@
+'use client';
+
 import { X, CheckCircle, Smartphone, AlertTriangle } from 'lucide-react';
 
 export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any) {
   if (!isOpen) return null;
+
+  const handleReconnect = async () => {
+    try {
+      await fetch('/api/whatsapp/connect', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
+      });
+    } catch (e) {
+      console.error('Failed to trigger reconnect:', e);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -46,7 +59,9 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
             <>
               <AlertTriangle className="h-12 w-12 text-red-500 mb-4" />
               <p className="text-sm text-red-400 mb-4">Bağlantı kesildi</p>
-              <button className="bg-[#00A884] text-[#111B21] px-4 py-2 rounded font-medium text-sm">Yeniden Bağlan</button>
+              <button onClick={handleReconnect} className="bg-[#00A884] text-[#111B21] px-4 py-2 rounded font-medium text-sm hover:bg-[#008f6f]">
+                Yeniden Bağlan
+              </button>
             </>
           )}
         </div>

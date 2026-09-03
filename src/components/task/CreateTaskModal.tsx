@@ -1,10 +1,13 @@
+'use client';
+
 import { useState } from 'react';
 import { X } from 'lucide-react';
 
 export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessageId, messageBody, contacts }: any) {
   const [title, setTitle] = useState(messageBody?.substring(0, 100) || '');
   const [description, setDescription] = useState(messageBody || '');
-  const [priority, setPriority] = useState('Orta');
+  const [priority, setPriority] = useState('MEDIUM');
+  const [dueDate, setDueDate] = useState('');
   const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
@@ -12,11 +15,30 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Dummy submit
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('mywa_token')}`
+        },
+        body: JSON.stringify({
+          chatId,
+          sourceMessageId,
+          title,
+          description,
+          priority,
+          dueDate: dueDate ? new Date(dueDate).toISOString() : undefined
+        })
+      });
+      if (res.ok) {
+        onClose();
+      }
+    } catch (err) {
+      console.error('Failed to create task:', err);
+    } finally {
       setLoading(false);
-      onClose();
-    }, 500);
+    }
   };
 
   return (
@@ -40,14 +62,21 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
             <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[80px]" />
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm text-[#8696A0]">Öncelik</label>
-            <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
-              <option>Düşük</option>
-              <option>Orta</option>
-              <option>Yüksek</option>
-              <option>Acil</option>
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-sm text-[#8696A0]">Öncelik</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
+                <option value="LOW">Düşük</option>
+                <option value="MEDIUM">Orta</option>
+                <option value="HIGH">Yüksek</option>
+                <option value="URGENT">Acil</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-[#8696A0]">Bitiş Tarihi</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#2A3942] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+            </div>
           </div>
 
           <div className="flex justify-end space-x-2 pt-4">
