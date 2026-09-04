@@ -13,6 +13,35 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+function extractMessageBody(msg: any): string {
+  if (!msg || !msg.message) return '';
+  const m = msg.message;
+  const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
+  
+  if (content.conversation) return content.conversation;
+  if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
+  if (content.imageMessage?.caption) return content.imageMessage.caption;
+  if (content.videoMessage?.caption) return content.videoMessage.caption;
+  if (content.documentMessage?.caption) return content.documentMessage.caption;
+  if (content.buttonsResponseMessage?.selectedDisplayText) return content.buttonsResponseMessage.selectedDisplayText;
+  if (content.listResponseMessage?.title) return content.listResponseMessage.title;
+  if (content.templateButtonReplyMessage?.selectedId) return content.templateButtonReplyMessage.selectedId;
+  return '';
+}
+
+function extractMessageType(msg: any): string {
+  if (!msg || !msg.message) return 'TEXT';
+  const m = msg.message;
+  const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
+  
+  if (content.imageMessage) return 'IMAGE';
+  if (content.videoMessage) return 'VIDEO';
+  if (content.audioMessage) return 'AUDIO';
+  if (content.documentMessage) return 'DOCUMENT';
+  if (content.stickerMessage) return 'STICKER';
+  return 'TEXT';
+}
+
 export class WhatsAppService {
   private static instance: WhatsAppService;
   private sock: any;
@@ -63,6 +92,7 @@ export class WhatsAppService {
         printQRInTerminal: false,
         logger,
         browser: ['MyWA Web', 'Chrome', '124.0.0.0'],
+        syncFullHistory: true,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 15000,
@@ -108,24 +138,44 @@ export class WhatsAppService {
         }
       });
 
-      // Sync chat history
+      // Sync chat and message history
       this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }: any) => {
-        console.log(`> Syncing messaging history: ${chats?.length || 0} chats, ${messages?.length || 0} messages`);
+        console.log(`> Syncing history: ${chats?.length || 0} chats, ${messages?.length || 0} messages`);
         if (chats) {
           for (const c of chats) {
             if (c.id) {
+              const name = c.name || (c.id.includes('@') ? c.id.split('@')[0] : c.id);
               await prisma.chat.upsert({
                 where: { id: c.id },
                 update: {
-                  name: c.name || c.id,
+                  name,
                   isGroup: c.id.endsWith('@g.us'),
                   updatedAt: new Date()
                 },
                 create: {
                   id: c.id,
-                  name: c.name || c.id,
+                  name,
                   isGroup: c.id.endsWith('@g.us'),
                   updatedAt: new Date()
+                }
+              }).catch(() => {});
+            }
+          }
+        }
+        if (contacts) {
+          for (const con of contacts) {
+            if (con.id) {
+              await prisma.contact.upsert({
+                where: { id: con.id },
+                update: {
+                  pushName: con.notify || con.name || undefined,
+                  phoneNumber: con.id.split('@')[0]
+                },
+                create: {
+                  id: con.id,
+                  pushName: con.notify || con.name || null,
+                  displayName: con.name || con.notify || null,
+                  phoneNumber: con.id.split('@')[0]
                 }
               }).catch(() => {});
             }
@@ -134,7 +184,8 @@ export class WhatsAppService {
         if (messages) {
           for (const msg of messages) {
             if (!msg.message || !msg.key?.remoteJid) continue;
-            const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
+            const text = extractMessageBody(msg);
+            const mType = extractMessageType(msg);
             const parsed = {
               id: msg.key.id,
               chatId: msg.key.remoteJid,
@@ -144,7 +195,7 @@ export class WhatsAppService {
               senderPhone: (msg.key.participant || msg.key.remoteJid)?.split('@')[0],
               senderName: msg.pushName,
               body: text,
-              messageType: 'TEXT',
+              messageType: mType,
               isFromMe: !!msg.key.fromMe,
               timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
             };
@@ -156,16 +207,17 @@ export class WhatsAppService {
       this.sock.ev.on('chats.upsert', async (newChats: any[]) => {
         for (const c of newChats) {
           if (c.id) {
+            const name = c.name || (c.id.includes('@') ? c.id.split('@')[0] : c.id);
             await prisma.chat.upsert({
               where: { id: c.id },
               update: {
-                name: c.name || c.id,
+                name,
                 isGroup: c.id.endsWith('@g.us'),
                 updatedAt: new Date()
               },
               create: {
                 id: c.id,
-                name: c.name || c.id,
+                name,
                 isGroup: c.id.endsWith('@g.us'),
                 updatedAt: new Date()
               }
@@ -203,14 +255,8 @@ export class WhatsAppService {
               }
             }
             
-            const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || '';
-            
-            let mType = 'TEXT';
-            if (msg.message.imageMessage) mType = 'IMAGE';
-            else if (msg.message.videoMessage) mType = 'VIDEO';
-            else if (msg.message.audioMessage) mType = 'AUDIO';
-            else if (msg.message.documentMessage) mType = 'DOCUMENT';
-            else if (msg.message.stickerMessage) mType = 'STICKER';
+            const text = extractMessageBody(msg);
+            const mType = extractMessageType(msg);
 
             const parsedMsg = {
               id: msg.key.id,

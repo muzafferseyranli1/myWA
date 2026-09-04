@@ -224,7 +224,12 @@ export default function ChatDashboard() {
             
             <div className="flex-1 bg-[url('/chat-bg.png')] bg-repeat bg-[#0B141A]">
               {selectedChatId ? (
-                <ChatWindow chatId={selectedChatId} messages={messages} onCreateTask={() => {}} />
+                <ChatWindow 
+                  chatId={selectedChatId} 
+                  chatName={chats.find(c => c.id === selectedChatId)?.name}
+                  messages={messages} 
+                  onCreateTask={() => {}} 
+                />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center bg-[#222E35]">
                   <div className="rounded-full bg-[#2A3942] p-4 text-[#00A884]">
