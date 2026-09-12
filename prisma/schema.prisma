@@ -84,17 +84,19 @@ model Contact {
 }
 
 model Message {
-  id          String      @id // WhatsApp Message ID
-  chatId      String      @map("chat_id")
-  senderId    String?     @map("sender_id")
-  body        String?
-  messageType MessageType @default(TEXT) @map("message_type")
-  mediaUrl    String?     @map("media_url")
-  mediaName   String?     @map("media_name")
-  mediaMime   String?     @map("media_mime")
-  isFromMe    Boolean     @default(false) @map("is_from_me")
-  timestamp   DateTime
-  createdAt   DateTime    @default(now()) @map("created_at")
+  id           String      @id // WhatsApp Message ID
+  chatId       String      @map("chat_id")
+  senderId     String?     @map("sender_id")
+  body         String?
+  quotedText   String?     @map("quoted_text")
+  quotedSender String?     @map("quoted_sender")
+  messageType  MessageType @default(TEXT) @map("message_type")
+  mediaUrl     String?     @map("media_url")
+  mediaName    String?     @map("media_name")
+  mediaMime    String?     @map("media_mime")
+  isFromMe     Boolean     @default(false) @map("is_from_me")
+  timestamp    DateTime
+  createdAt    DateTime    @default(now()) @map("created_at")
 
   chat    Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender  Contact? @relation("sender", fields: [senderId], references: [id], onDelete: SetNull)

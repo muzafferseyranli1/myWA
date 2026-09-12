@@ -29,6 +29,33 @@ function extractMessageBody(msg: any): string {
   return '';
 }
 
+function extractQuotedInfo(msg: any): { quotedText: string | null; quotedSender: string | null } {
+  if (!msg || !msg.message) return { quotedText: null, quotedSender: null };
+  const m = msg.message;
+  const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
+  
+  const ctx = content.extendedTextMessage?.contextInfo || 
+              content.imageMessage?.contextInfo || 
+              content.videoMessage?.contextInfo || 
+              content.documentMessage?.contextInfo || 
+              content.audioMessage?.contextInfo;
+
+  if (ctx && ctx.quotedMessage) {
+    const q = ctx.quotedMessage;
+    const qText = q.conversation || 
+                  q.extendedTextMessage?.text || 
+                  q.imageMessage?.caption || 
+                  q.videoMessage?.caption || 
+                  q.documentMessage?.caption || 
+                  (q.imageMessage ? '📷 Fotoğraf' : q.videoMessage ? '🎥 Video' : q.audioMessage ? '🎵 Ses Kaydı' : q.documentMessage ? '📄 Belge' : 'İleti');
+    
+    let qSender = ctx.participant ? ctx.participant.split('@')[0] : null;
+    return { quotedText: qText, quotedSender: qSender };
+  }
+
+  return { quotedText: null, quotedSender: null };
+}
+
 function extractMessageType(msg: any): string {
   if (!msg || !msg.message) return 'TEXT';
   const m = msg.message;
@@ -135,12 +162,34 @@ export class WhatsAppService {
           this.qrcodeDataUrl = null;
           this.isInitializing = false;
           if (this.onStatus) this.onStatus(this.status);
+          
+          // Auto sync groups upon connection
+          setTimeout(() => this.syncAllGroups(), 2000);
         }
       });
 
       // Sync chat and message history
       this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }: any) => {
         console.log(`> Syncing history: ${chats?.length || 0} chats, ${messages?.length || 0} messages`);
+        if (contacts) {
+          for (const con of contacts) {
+            if (con.id) {
+              await prisma.contact.upsert({
+                where: { id: con.id },
+                update: {
+                  pushName: con.notify || con.name || undefined,
+                  phoneNumber: con.id.split('@')[0]
+                },
+                create: {
+                  id: con.id,
+                  pushName: con.notify || con.name || null,
+                  displayName: con.name || con.notify || null,
+                  phoneNumber: con.id.split('@')[0]
+                }
+              }).catch(() => {});
+            }
+          }
+        }
         if (chats) {
           for (const c of chats) {
             if (c.id) {
@@ -162,39 +211,23 @@ export class WhatsAppService {
             }
           }
         }
-        if (contacts) {
-          for (const con of contacts) {
-            if (con.id) {
-              await prisma.contact.upsert({
-                where: { id: con.id },
-                update: {
-                  pushName: con.notify || con.name || undefined,
-                  phoneNumber: con.id.split('@')[0]
-                },
-                create: {
-                  id: con.id,
-                  pushName: con.notify || con.name || null,
-                  displayName: con.name || con.notify || null,
-                  phoneNumber: con.id.split('@')[0]
-                }
-              }).catch(() => {});
-            }
-          }
-        }
         if (messages) {
           for (const msg of messages) {
             if (!msg.message || !msg.key?.remoteJid) continue;
             const text = extractMessageBody(msg);
+            const { quotedText, quotedSender } = extractQuotedInfo(msg);
             const mType = extractMessageType(msg);
             const parsed = {
               id: msg.key.id,
               chatId: msg.key.remoteJid,
-              chatName: msg.pushName || msg.key.remoteJid,
+              chatName: msg.key.remoteJid.endsWith('@g.us') ? undefined : (msg.pushName || msg.key.remoteJid),
               isGroup: msg.key.remoteJid?.endsWith('@g.us'),
               senderId: msg.key.participant || msg.key.remoteJid,
               senderPhone: (msg.key.participant || msg.key.remoteJid)?.split('@')[0],
               senderName: msg.pushName,
               body: text,
+              quotedText,
+              quotedSender,
               messageType: mType,
               isFromMe: !!msg.key.fromMe,
               timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
@@ -202,6 +235,7 @@ export class WhatsAppService {
             await messageService.saveMessage(parsed).catch(() => {});
           }
         }
+        this.syncAllGroups();
       });
 
       this.sock.ev.on('chats.upsert', async (newChats: any[]) => {
@@ -256,17 +290,25 @@ export class WhatsAppService {
             }
             
             const text = extractMessageBody(msg);
+            const { quotedText, quotedSender } = extractQuotedInfo(msg);
             const mType = extractMessageType(msg);
 
+            const isGroup = msg.key.remoteJid?.endsWith('@g.us');
+            const senderId = msg.key.participant || msg.key.remoteJid;
+            const senderPhone = senderId?.split('@')[0];
+
+            // If it's a group, don't overwrite group name with sender pushName
             const parsedMsg = {
               id: msg.key.id,
               chatId: msg.key.remoteJid,
-              chatName: msg.pushName || msg.key.remoteJid,
-              isGroup: msg.key.remoteJid?.endsWith('@g.us'),
-              senderId: msg.key.participant || msg.key.remoteJid,
-              senderPhone: (msg.key.participant || msg.key.remoteJid)?.split('@')[0],
+              chatName: isGroup ? undefined : (msg.pushName || msg.key.remoteJid),
+              isGroup,
+              senderId,
+              senderPhone,
               senderName: msg.pushName,
               body: text,
+              quotedText,
+              quotedSender,
               messageType: mType,
               mediaUrl,
               mediaName,
@@ -276,6 +318,11 @@ export class WhatsAppService {
             };
             
             this.onMessage(parsedMsg);
+
+            // If it's a group and we don't have its proper subject, fetch it
+            if (isGroup) {
+              this.fetchAndSaveGroupMetadata(msg.key.remoteJid);
+            }
           }
         }
       });
@@ -285,6 +332,49 @@ export class WhatsAppService {
       this.isInitializing = false;
       if (this.onStatus) this.onStatus(this.status);
     }
+  }
+
+  public async syncAllGroups() {
+    if (!this.sock) return;
+    try {
+      console.log('> Fetching all participating groups...');
+      const groups = await this.sock.groupFetchAllParticipating();
+      for (const [jid, metadata] of Object.entries(groups as any)) {
+        if (metadata && (metadata as any).subject) {
+          await prisma.chat.upsert({
+            where: { id: jid },
+            update: {
+              name: (metadata as any).subject,
+              isGroup: true,
+              updatedAt: new Date()
+            },
+            create: {
+              id: jid,
+              name: (metadata as any).subject,
+              isGroup: true,
+              updatedAt: new Date()
+            }
+          }).catch(() => {});
+        }
+      }
+      console.log(`> Successfully synced ${Object.keys(groups).length} WhatsApp groups! ✅`);
+    } catch (err: any) {
+      console.error('Error syncing groups:', err.message);
+    }
+  }
+
+  public async fetchAndSaveGroupMetadata(groupJid: string) {
+    if (!this.sock) return;
+    try {
+      const meta = await this.sock.groupMetadata(groupJid);
+      if (meta && meta.subject) {
+        await prisma.chat.upsert({
+          where: { id: groupJid },
+          update: { name: meta.subject, isGroup: true },
+          create: { id: groupJid, name: meta.subject, isGroup: true }
+        });
+      }
+    } catch (e) {}
   }
   
   private getExtension(message: any) {

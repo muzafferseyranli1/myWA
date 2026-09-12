@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Send, Image as ImageIcon, FileText } from 'lucide-react';
+import { Send, Image as ImageIcon, FileText, Users } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import CreateTaskModal from '../task/CreateTaskModal';
 import { getSocket } from '../../lib/socket';
@@ -37,13 +37,18 @@ export default function ChatWindow({ chatId, chatName, messages, onCreateTask }:
     setIsTaskModalOpen(true);
   };
 
-  const displayName = chatName || (chatId.includes('@') ? chatId.split('@')[0] : chatId);
+  const isGroup = chatId.endsWith('@g.us');
+  const isSelf = !isGroup && chatId.includes('905332760534');
+  const rawName = chatName && !chatName.includes('@g.us') && !chatName.includes('@s.whatsapp.net') 
+    ? chatName 
+    : (isGroup ? 'Grup Sohbeti' : (chatId.includes('@') ? chatId.split('@')[0] : chatId));
+  const displayName = isSelf ? `${rawName} (Siz)` : rawName;
 
   return (
     <div className="flex h-full flex-col relative">
       <div className="flex h-[60px] items-center bg-[#202C33] px-4 border-b border-[#222E35]">
         <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[#6B7C85] text-sm font-bold text-[#E9EDEF] mr-3">
-          {displayName.substring(0, 2).toUpperCase()}
+          {isGroup ? <Users className="h-5 w-5 text-white" /> : displayName.substring(0, 2).toUpperCase()}
         </div>
         <div>
           <h2 className="text-base font-semibold text-[#E9EDEF]">{displayName}</h2>

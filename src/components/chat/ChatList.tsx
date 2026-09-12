@@ -48,10 +48,14 @@ export default function ChatList({ chats, selectedChatId, onSelectChat }: ChatLi
           </div>
         ) : (
           sortedChats.map(chat => {
-            const rawName = chat.name || (chat.id.includes('@') ? chat.id.split('@')[0] : chat.id);
-            const isSelf = chat.id.includes('905332760534'); // user number
+            const isGroup = !!chat.isGroup || chat.id.endsWith('@g.us');
+            const isSelf = !isGroup && chat.id.includes('905332760534'); // user number
+            const rawName = chat.name && !chat.name.includes('@g.us') && !chat.name.includes('@s.whatsapp.net') 
+              ? chat.name 
+              : (isGroup ? 'Grup Sohbeti' : (chat.id.includes('@') ? chat.id.split('@')[0] : chat.id));
+            
             const displayName = isSelf ? `${rawName} (Siz)` : rawName;
-            const lastMsg = chat.lastMessage?.body || chat.lastMessagePreview || '';
+            const lastMsg = chat.lastMessage?.body || chat.lastMessage?.quotedText || chat.lastMessagePreview || '';
             const lastTime = chat.lastMessage?.timestamp || chat.updatedAt;
 
             return (
@@ -64,7 +68,7 @@ export default function ChatList({ chats, selectedChatId, onSelectChat }: ChatLi
                 )}
               >
                 <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[#6B7C85] text-sm font-bold text-[#E9EDEF]">
-                  {chat.isGroup ? <Users className="h-5 w-5" /> : displayName.substring(0, 2).toUpperCase()}
+                  {isGroup ? <Users className="h-5 w-5 text-white" /> : displayName.substring(0, 2).toUpperCase()}
                 </div>
                 
                 <div className="ml-3 flex-1 overflow-hidden">
@@ -81,7 +85,7 @@ export default function ChatList({ chats, selectedChatId, onSelectChat }: ChatLi
                     <div className="flex items-center space-x-1">
                       {chat._count?.tasks > 0 && (
                         <span className="flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-[#00A884] text-[10px] font-bold text-[#111B21]">
-                          {chat._count.tasks} görev
+                          {chat._count.tasks}
                         </span>
                       )}
                     </div>

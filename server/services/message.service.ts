@@ -5,14 +5,17 @@ export const messageService = {
   async saveMessage(data: any) {
     const {
       id, chatId, chatName, isGroup, senderId, senderPhone, senderName,
-      body, messageType, mediaUrl, mediaName, mediaMime, isFromMe, timestamp
+      body, quotedText, quotedSender, messageType, mediaUrl, mediaName, mediaMime, isFromMe, timestamp
     } = data;
 
-    // Upsert chat
+    // Only update chat name if it's provided and not a fallback JID or if current chat name is just a JID
+    const existingChat = await prisma.chat.findUnique({ where: { id: chatId } });
+    const shouldUpdateName = chatName && !chatName.includes('@') && (!existingChat || existingChat.name.includes('@'));
+
     await prisma.chat.upsert({
       where: { id: chatId },
       update: {
-        name: chatName || chatId,
+        name: shouldUpdateName ? chatName : existingChat?.name || chatName || chatId,
         isGroup: !!isGroup,
         updatedAt: timestamp ? new Date(timestamp) : new Date()
       },
@@ -56,6 +59,8 @@ export const messageService = {
         chatId,
         senderId: isFromMe ? null : validSenderId,
         body: body || '',
+        quotedText: quotedText || null,
+        quotedSender: quotedSender || null,
         messageType: validMessageType,
         mediaUrl: mediaUrl || null,
         mediaName: mediaName || null,
@@ -71,7 +76,7 @@ export const messageService = {
     return message;
   },
 
-  async getMessagesByChat(chatId: string, page: number = 1, limit: number = 50) {
+  async getMessagesByChat(chatId: string, page: number = 1, limit: number = 100) {
     const skip = (page - 1) * limit;
     
     const messages = await prisma.message.findMany({
