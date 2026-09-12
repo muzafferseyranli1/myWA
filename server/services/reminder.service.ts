@@ -21,17 +21,20 @@ function formatDateTR(date: Date): string {
 
 export const reminderService = {
   generateReminderMessage(task: any, state: 'OVERDUE' | 'DUE_SOON' | 'IN_PROGRESS'): string {
-    const phones = task.assignees.map((a: any) => a.contact.phoneNumber).join(', @');
+    const phones = task.assignees.map((a: any) => {
+      const jid = contactResolver.resolveToMentionJid(a.contact.id);
+      return jid ? `@${jid.split('@')[0]}` : (a.contact.pushName || a.contact.phoneNumber);
+    }).join(' ');
     const days = task.dueDate ? absDays(new Date(task.dueDate)) : 0;
     const date = task.dueDate ? formatDateTR(new Date(task.dueDate)) : '-';
 
     switch (state) {
       case 'OVERDUE':
-        return `🚨⏰ *HATIRLATMA: Süresi Geçmiş Görev!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* @${phones}\n📅 *Son Tarih:* ${date}\n⚠️ *Gecikme:* ${days} gün\n\n❗ Bu görevin süresi geçmiş. Lütfen durumu güncelleyin.`;
+        return `🚨⏰ *HATIRLATMA: Süresi Geçmiş Görev!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n📅 *Son Tarih:* ${date}\n⚠️ *Gecikme:* ${days} gün\n\n❗ Bu görevin süresi geçmiş. Lütfen durumu güncelleyin.`;
       case 'DUE_SOON':
-        return `⏳🔔 *HATIRLATMA: Son Tarih Yaklaşıyor!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* @${phones}\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n💪 Son tarih yaklaşıyor, şimdi harekete geçme zamanı!`;
+        return `⏳🔔 *HATIRLATMA: Son Tarih Yaklaşıyor!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n💪 Son tarih yaklaşıyor, şimdi harekete geçme zamanı!`;
       case 'IN_PROGRESS':
-        return `🔄📊 *DURUM KONTROLÜ*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* @${phones}\n🏷️ *Durum:* Devam Ediyor\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n📝 Görev durumunuz hakkında güncelleme paylaşır mısınız?`;
+        return `🔄📊 *DURUM KONTROLÜ*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n🏷️ *Durum:* Devam Ediyor\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n📝 Görev durumunuz hakkında güncelleme paylaşır mısınız?`;
       default:
         return '';
     }
@@ -48,8 +51,11 @@ export const reminderService = {
     if (overdue.length > 0) {
       msg += `🚨 *Süresi Geçenler (${overdue.length}):*\n`;
       overdue.forEach((t, i) => {
-        const phones = t.assignees.map((a: any) => a.contact.phoneNumber).join(', @');
-        msg += `  ${i + 1}. ❌ ${t.title} — @${phones} (${absDays(new Date(t.dueDate))} gün gecikme)\n`;
+        const phones = t.assignees.map((a: any) => {
+          const jid = contactResolver.resolveToMentionJid(a.contact.id);
+          return jid ? `@${jid.split('@')[0]}` : (a.contact.pushName || a.contact.phoneNumber);
+        }).join(' ');
+        msg += `  ${i + 1}. ❌ ${t.title} — ${phones} (${absDays(new Date(t.dueDate))} gün gecikme)\n`;
       });
       msg += '\n';
     }
@@ -57,8 +63,11 @@ export const reminderService = {
     if (dueSoon.length > 0) {
       msg += `⏳ *Yaklaşanlar (${dueSoon.length}):*\n`;
       dueSoon.forEach((t, i) => {
-        const phones = t.assignees.map((a: any) => a.contact.phoneNumber).join(', @');
-        msg += `  ${i + 1}. ⚡ ${t.title} — @${phones} (${daysUntil(new Date(t.dueDate))} gün kaldı)\n`;
+        const phones = t.assignees.map((a: any) => {
+          const jid = contactResolver.resolveToMentionJid(a.contact.id);
+          return jid ? `@${jid.split('@')[0]}` : (a.contact.pushName || a.contact.phoneNumber);
+        }).join(' ');
+        msg += `  ${i + 1}. ⚡ ${t.title} — ${phones} (${daysUntil(new Date(t.dueDate))} gün kaldı)\n`;
       });
       msg += '\n';
     }
@@ -66,9 +75,12 @@ export const reminderService = {
     if (inProgress.length > 0) {
       msg += `🔄 *Devam Edenler (${inProgress.length}):*\n`;
       inProgress.forEach((t, i) => {
-        const phones = t.assignees.map((a: any) => a.contact.phoneNumber).join(', @');
+        const phones = t.assignees.map((a: any) => {
+          const jid = contactResolver.resolveToMentionJid(a.contact.id);
+          return jid ? `@${jid.split('@')[0]}` : (a.contact.pushName || a.contact.phoneNumber);
+        }).join(' ');
         const days = t.dueDate ? `${daysUntil(new Date(t.dueDate))} gün kaldı` : 'Tarih yok';
-        msg += `  ${i + 1}. 🔧 ${t.title} — @${phones} (${days})\n`;
+        msg += `  ${i + 1}. 🔧 ${t.title} — ${phones} (${days})\n`;
       });
       msg += '\n';
     }
@@ -147,8 +159,9 @@ export const reminderService = {
         for (const [assigneeId, assignTasks] of Object.entries(assigneesMap)) {
           const contact = assignTasks[0].assignees.find(a => a.contact.id === assigneeId)?.contact;
           const mentionJid = contactResolver.resolveToMentionJid(assigneeId);
+          const mentionTag = mentionJid ? `@${mentionJid.split('@')[0]}` : (contact?.pushName || contact?.phoneNumber || '');
           
-          let message = `⚠️ Sayın @${contact?.pushName || contact?.phoneNumber},\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
+          let message = `⚠️ Sayın ${mentionTag}\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
           
           assignTasks.forEach((t, i) => {
             const dueDate = t.dueDate ? t.dueDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
@@ -159,7 +172,8 @@ export const reminderService = {
           message += `Lütfen en kısa sürede tamamlayın veya durum güncellemesi yapın.`;
 
           try {
-            await whatsappService.sendMessage(chatIdKey, message, [mentionJid]);
+            const mentionsList = mentionJid ? [mentionJid] : [];
+            await whatsappService.sendMessage(chatIdKey, message, mentionsList);
             
             for (const t of assignTasks) {
               await prisma.taskReminder.create({

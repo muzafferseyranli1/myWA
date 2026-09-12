@@ -121,7 +121,14 @@ export const taskService = {
           include: { contact: true }
         });
         const mentions = contactResolver.resolveMentions(assignees.map(a => a.contactId));
-        const message = `✅ *Görev Tamamlandı!*\n\n📋 *${updatedTask.title}*\nDurum: ✅ Tamamlandı`;
+        const assigneeTags = assignees.map(a => {
+          const jid = contactResolver.resolveToMentionJid(a.contactId);
+          if (jid) return `@${jid.split('@')[0]}`;
+          return a.contact.pushName || a.contact.phoneNumber;
+        }).join(' ');
+        let message = `✅ *Görev Tamamlandı!*\n\n📋 *${updatedTask.title}*\n`;
+        if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
+        message += `Durum: ✅ Tamamlandı`;
         await whatsappService.sendMessage(updatedTask.chatId, message, mentions);
       } catch (e) {
         console.error('Task completion WA notification error:', e);
