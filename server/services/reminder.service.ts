@@ -1,6 +1,7 @@
 import { whatsappService } from './whatsapp.service';
 import { taskService } from './task.service';
 import { prisma } from '../../src/lib/prisma';
+import { contactResolver } from './contact-resolver.service';
 
 function daysUntil(date: Date): number {
   const target = new Date(date);
@@ -95,9 +96,8 @@ export const reminderService = {
     if (!state) return { sent: 0 };
 
     const message = this.generateReminderMessage(task, state);
-    const mentions = task.assignees.map((a: any) => `${a.contact.phoneNumber}@s.whatsapp.net`);
-
-    await whatsappService.sendMessage(task.chatId, message, { mentions });
+    const mentions = contactResolver.resolveMentions(task.assignees.map((a: any) => a.contact.id));
+    await whatsappService.sendMessage(task.chatId, message, mentions);
     
     await prisma.taskReminder.create({
       data: {
@@ -123,18 +123,69 @@ export const reminderService = {
     });
 
     const now = new Date();
-    let targetTasks = tasks;
     
     if (scope === 'overdue') {
-      targetTasks = tasks.filter(t => t.dueDate && t.dueDate < now);
-    } else if (scope === 'due_soon') {
+      const overdueTasks = tasks.filter(t => t.dueDate && t.dueDate < now);
+      if (overdueTasks.length === 0) return { sent: 0, chats: 0 };
+
+      const tasksByAssigneeByChat: Record<string, Record<string, typeof overdueTasks>> = {};
+      
+      for (const task of overdueTasks) {
+        for (const assignee of task.assignees) {
+          const assigneeId = assignee.contact.id;
+          if (!tasksByAssigneeByChat[task.chatId]) tasksByAssigneeByChat[task.chatId] = {};
+          if (!tasksByAssigneeByChat[task.chatId][assigneeId]) tasksByAssigneeByChat[task.chatId][assigneeId] = [];
+          tasksByAssigneeByChat[task.chatId][assigneeId].push(task);
+        }
+      }
+
+      let totalSent = 0;
+      let chatCount = 0;
+
+      for (const [chatIdKey, assigneesMap] of Object.entries(tasksByAssigneeByChat)) {
+        chatCount++;
+        for (const [assigneeId, assignTasks] of Object.entries(assigneesMap)) {
+          const contact = assignTasks[0].assignees.find(a => a.contact.id === assigneeId)?.contact;
+          const mentionJid = contactResolver.resolveToMentionJid(assigneeId);
+          
+          let message = `⚠️ Sayın @${contact?.pushName || contact?.phoneNumber},\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
+          
+          assignTasks.forEach((t, i) => {
+            const dueDate = t.dueDate ? t.dueDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
+            const days = absDays(t.dueDate!);
+            message += `${i + 1}. 📋 *${t.title}*\n   📅 Bitiş: ${dueDate} | ⏰ ${days} gündür gecikiyor!\n\n`;
+          });
+          
+          message += `Lütfen en kısa sürede tamamlayın veya durum güncellemesi yapın.`;
+
+          try {
+            await whatsappService.sendMessage(chatIdKey, message, [mentionJid]);
+            
+            for (const t of assignTasks) {
+              await prisma.taskReminder.create({
+                data: {
+                  taskId: t.id,
+                  messageContent: message,
+                }
+              });
+            }
+            totalSent += assignTasks.length;
+          } catch (err) {
+            console.error(`Failed to send overdue reminder to chat ${chatIdKey} for ${assigneeId}:`, err);
+          }
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+      return { sent: totalSent, chats: chatCount };
+    }
+
+    // Default flow for due_soon or all_pending
+    let targetTasks = tasks;
+    if (scope === 'due_soon') {
       targetTasks = tasks.filter(t => t.dueDate && t.dueDate >= now && daysUntil(t.dueDate) <= 3);
     }
-    // 'all_pending' keeps all non-DONE tasks
-
     if (targetTasks.length === 0) return { sent: 0, chats: 0 };
 
-    // Group tasks by chat
     const tasksByChat: Record<string, typeof targetTasks> = {};
     for (const task of targetTasks) {
       if (!tasksByChat[task.chatId]) tasksByChat[task.chatId] = [];
@@ -146,13 +197,12 @@ export const reminderService = {
     for (const [chatIdKey, chatTasks] of Object.entries(tasksByChat)) {
       const message = this.generateSummaryMessage(chatTasks);
       
-      const allPhones = chatTasks.flatMap(t => t.assignees.map(a => a.contact.phoneNumber));
-      const uniqueMentions = [...new Set(allPhones)].map(phone => `${phone}@s.whatsapp.net`);
+      const allIds = chatTasks.flatMap(t => t.assignees.map(a => a.contact.id));
+      const uniqueMentions = [...new Set(allIds)].map(id => contactResolver.resolveToMentionJid(id));
 
       try {
-        await whatsappService.sendMessage(chatIdKey, message, { mentions: uniqueMentions });
+        await whatsappService.sendMessage(chatIdKey, message, uniqueMentions);
         
-        // Log reminders
         for (const t of chatTasks) {
           await prisma.taskReminder.create({
             data: {
@@ -166,8 +216,6 @@ export const reminderService = {
       } catch (err) {
         console.error(`Failed to send reminder to chat ${chatIdKey}:`, err);
       }
-
-      // Rate limit: 2 second delay between chat messages
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
 

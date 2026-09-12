@@ -1,16 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, Users, User } from 'lucide-react';
+import { Search, Users } from 'lucide-react';
 import { cn, formatTime } from '../../lib/utils';
 
 interface ChatListProps {
   chats: any[];
   selectedChatId: string | null;
   onSelectChat: (id: string) => void;
+  myJid?: string;
 }
 
-export default function ChatList({ chats, selectedChatId, onSelectChat }: ChatListProps) {
+export default function ChatList({ chats, selectedChatId, onSelectChat, myJid }: ChatListProps) {
   const [search, setSearch] = useState('');
 
   const chatList = Array.isArray(chats) ? chats : [];
@@ -25,6 +26,8 @@ export default function ChatList({ chats, selectedChatId, onSelectChat }: ChatLi
     const timeB = new Date(b.updatedAt || b.lastMessage?.timestamp || 0).getTime();
     return timeB - timeA;
   });
+
+  const userNumber = myJid ? myJid.split('@')[0] : '';
 
   return (
     <div className="flex h-full flex-col bg-[#111B21]">
@@ -49,7 +52,7 @@ export default function ChatList({ chats, selectedChatId, onSelectChat }: ChatLi
         ) : (
           sortedChats.map(chat => {
             const isGroup = !!chat.isGroup || chat.id.endsWith('@g.us');
-            const isSelf = !isGroup && chat.id.includes('905332760534'); // user number
+            const isSelf = !isGroup && userNumber && chat.id.includes(userNumber);
             const rawName = chat.name && !chat.name.includes('@g.us') && !chat.name.includes('@s.whatsapp.net') 
               ? chat.name 
               : (isGroup ? 'Grup Sohbeti' : (chat.id.includes('@') ? chat.id.split('@')[0] : chat.id));

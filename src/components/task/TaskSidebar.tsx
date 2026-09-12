@@ -1,17 +1,20 @@
 'use client';
 
-import { Plus } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import TaskCard from './TaskCard';
 import { useState } from 'react';
 import CreateTaskModal from './CreateTaskModal';
 import EditTaskModal from './EditTaskModal';
 
-export default function TaskSidebar({ chatId, tasks, onEditTask, onRefresh }: any) {
+export default function TaskSidebar({ chatId, tasks, contacts, onRefresh }: any) {
   const [filter, setFilter] = useState('Tümü');
+  const [search, setSearch] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
 
   const filteredTasks = tasks.filter((t: any) => {
+    if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
+    
     if (filter === 'Tümü') return true;
     if (filter === 'Yapılacak' && t.status === 'TODO') return true;
     if (filter === 'Devam Eden' && t.status === 'IN_PROGRESS') return true;
@@ -29,16 +32,28 @@ export default function TaskSidebar({ chatId, tasks, onEditTask, onRefresh }: an
         </button>
       </div>
 
-      <div className="flex space-x-1 border-b border-[#222E35] p-2 overflow-x-auto">
-        {['Tümü', 'Yapılacak', 'Devam Eden', 'Tamamlandı'].map(tab => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={`whitespace-nowrap rounded px-3 py-1 text-xs font-medium ${filter === tab ? 'bg-[#2A3942] text-[#00A884]' : 'text-[#8696A0] hover:bg-[#202C33]'}`}
-          >
-            {tab}
-          </button>
-        ))}
+      <div className="border-b border-[#222E35] p-2">
+        <div className="relative mb-2">
+          <Search className="absolute left-2 top-2 h-4 w-4 text-[#8696A0]" />
+          <input
+            type="text"
+            placeholder="Görevlerde ara..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded bg-[#202C33] py-1.5 pl-8 pr-3 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]"
+          />
+        </div>
+        <div className="flex space-x-1 overflow-x-auto">
+          {['Tümü', 'Yapılacak', 'Devam Eden', 'Tamamlandı'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setFilter(tab)}
+              className={`whitespace-nowrap rounded px-3 py-1 text-xs font-medium ${filter === tab ? 'bg-[#2A3942] text-[#00A884]' : 'text-[#8696A0] hover:bg-[#202C33]'}`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -51,8 +66,8 @@ export default function TaskSidebar({ chatId, tasks, onEditTask, onRefresh }: an
         )}
       </div>
 
-      {isCreateOpen && <CreateTaskModal isOpen={isCreateOpen} onClose={() => { setIsCreateOpen(false); onRefresh(); }} chatId={chatId} contacts={[]} />}
-      {editingTask && <EditTaskModal isOpen={!!editingTask} onClose={() => { setEditingTask(null); onRefresh(); }} task={editingTask} contacts={[]} />}
+      {isCreateOpen && <CreateTaskModal isOpen={isCreateOpen} onClose={() => { setIsCreateOpen(false); onRefresh(); }} chatId={chatId} contacts={contacts} onTaskCreated={onRefresh} />}
+      {editingTask && <EditTaskModal isOpen={!!editingTask} onClose={() => { setEditingTask(null); onRefresh(); }} task={editingTask} contacts={contacts} onTaskUpdated={onRefresh} />}
     </div>
   );
 }

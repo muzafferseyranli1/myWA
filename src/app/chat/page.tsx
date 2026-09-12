@@ -19,9 +19,11 @@ export default function ChatDashboard() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<any[]>([]);
   
   const [waStatus, setWaStatus] = useState<'qr' | 'connecting' | 'authenticated' | 'ready' | 'disconnected'>('disconnected');
   const [qrCode, setQrCode] = useState<string>('');
+  const [myJid, setMyJid] = useState<string>('');
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(true);
 
@@ -57,6 +59,9 @@ export default function ChatDashboard() {
           setQrCode(data.qr);
           setWaStatus('qr');
         }
+        if (data.myJid) {
+          setMyJid(data.myJid);
+        }
       }
     };
 
@@ -69,7 +74,13 @@ export default function ChatDashboard() {
     };
 
     const onNewMsg = (msg: any) => {
-      setMessages(prev => [...prev, msg]);
+      setMessages(prev => {
+        // Only append if it's the selected chat
+        if (msg.chatId === selectedChatId) {
+          return [...prev, msg];
+        }
+        return prev;
+      });
     };
 
     const onTaskCreated = (task: any) => {
@@ -102,7 +113,7 @@ export default function ChatDashboard() {
       sock.off('task_updated', onTaskUpdated);
       sock.off('task_deleted', onTaskDeleted);
     };
-  }, [router]);
+  }, [router, selectedChatId]);
 
   const fetchWaStatus = async () => {
     try {
@@ -116,6 +127,9 @@ export default function ChatDashboard() {
           setQrCode(data.qr);
           setWaStatus('qr');
         }
+        if (data.myJid) {
+          setMyJid(data.myJid);
+        }
       }
     } catch (e) {}
   };
@@ -127,6 +141,17 @@ export default function ChatDashboard() {
       });
       if (res.ok) setChats(await res.json());
     } catch (e) {}
+  };
+
+  const fetchContacts = async (chatId: string) => {
+    try {
+      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/contacts`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
+      });
+      if (res.ok) setContacts(await res.json());
+    } catch (e) {
+      console.error('fetchContacts error:', e);
+    }
   };
 
   const fetchMessagesAndTasks = async (chatId: string) => {
@@ -161,6 +186,7 @@ export default function ChatDashboard() {
     setSelectedChatId(chatId);
     sock.emit('join_chat', chatId);
     fetchMessagesAndTasks(chatId);
+    fetchContacts(chatId);
   };
 
   const handleLogout = () => {
@@ -219,7 +245,7 @@ export default function ChatDashboard() {
         {currentView === 'chat' ? (
           <>
             <div className="w-[320px] flex-shrink-0 border-r border-[#222E35] bg-[#111B21]">
-              <ChatList chats={chats} selectedChatId={selectedChatId} onSelectChat={handleSelectChat} />
+              <ChatList chats={chats} selectedChatId={selectedChatId} onSelectChat={handleSelectChat} myJid={myJid} />
             </div>
             
             <div className="flex-1 bg-[url('/chat-bg.png')] bg-repeat bg-[#0B141A]">
@@ -228,7 +254,8 @@ export default function ChatDashboard() {
                   chatId={selectedChatId} 
                   chatName={chats.find(c => c.id === selectedChatId)?.name}
                   messages={messages} 
-                  onCreateTask={() => {}} 
+                  contacts={contacts}
+                  myJid={myJid}
                 />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center bg-[#222E35]">
@@ -242,7 +269,7 @@ export default function ChatDashboard() {
 
             {isTaskSidebarOpen && selectedChatId && (
               <div className="w-[350px] flex-shrink-0 border-l border-[#222E35] bg-[#111B21]">
-                <TaskSidebar chatId={selectedChatId} tasks={tasks} onEditTask={() => {}} onRefresh={() => fetchMessagesAndTasks(selectedChatId)} />
+                <TaskSidebar chatId={selectedChatId} tasks={tasks} contacts={contacts} onRefresh={() => fetchMessagesAndTasks(selectedChatId)} />
               </div>
             )}
           </>

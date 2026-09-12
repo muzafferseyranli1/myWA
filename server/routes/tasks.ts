@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { taskService } from '../services/task.service';
 import { reminderService } from '../services/reminder.service';
+import { broadcastTaskCreated, broadcastTaskUpdated, broadcastTaskDeleted } from '../sockets';
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
@@ -32,6 +33,7 @@ router.get('/overdue', async (req, res) => {
 router.post('/', requireAuth, async (req: any, res) => {
   try {
     const task = await taskService.createTask({ ...req.body, createdBy: req.user?.id });
+    broadcastTaskCreated(task);
     res.json(task);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -42,6 +44,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   try {
     const taskId = String(req.params.id);
     const task = await taskService.updateTask(taskId, req.body);
+    broadcastTaskUpdated(task);
     res.json(task);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -52,6 +55,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const taskId = String(req.params.id);
     await taskService.deleteTask(taskId);
+    broadcastTaskDeleted(taskId);
     res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

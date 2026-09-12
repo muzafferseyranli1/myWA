@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from '../../src/lib/prisma';
 import { messageService } from './message.service';
+import { contactResolver } from './contact-resolver.service';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -165,6 +166,7 @@ export class WhatsAppService {
           
           // Auto sync groups upon connection
           setTimeout(() => this.syncAllGroups(), 2000);
+          await contactResolver.loadFromDatabase();
         }
       });
 
@@ -269,7 +271,8 @@ export class WhatsAppService {
             let mediaName = null;
             let mediaMime = null;
             
-            const isMedia = msg.message.imageMessage || msg.message.videoMessage || msg.message.audioMessage || msg.message.documentMessage;
+            const innerMsg = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message?.viewOnceMessageV2?.message || msg.message?.documentWithCaptionMessage?.message || msg.message;
+            const isMedia = innerMsg?.imageMessage || innerMsg?.videoMessage || innerMsg?.audioMessage || innerMsg?.documentMessage;
             
             if (isMedia) {
               try {
@@ -277,13 +280,13 @@ export class WhatsAppService {
                   logger,
                   reuploadRequest: this.sock?.updateMediaMessage
                 } as any);
-                const ext = this.getExtension(msg.message);
+                const ext = this.getExtension(innerMsg);
                 const filename = `${randomUUID()}${ext}`;
                 const filepath = path.join(UPLOAD_DIR, filename);
                 fs.writeFileSync(filepath, buffer);
                 mediaUrl = `/uploads/${filename}`;
                 mediaName = filename;
-                mediaMime = this.getMime(msg.message);
+                mediaMime = this.getMime(innerMsg);
               } catch (err) {
                 console.error('Media download error:', err);
               }
@@ -355,6 +358,33 @@ export class WhatsAppService {
               updatedAt: new Date()
             }
           }).catch(() => {});
+
+          if ((metadata as any).participants) {
+            for (const p of (metadata as any).participants) {
+              await prisma.contact.upsert({
+                where: { id: p.id },
+                update: {
+                  phoneNumber: p.id.split('@')[0],
+                  ...(p.notify && { pushName: p.notify })
+                },
+                create: {
+                  id: p.id,
+                  phoneNumber: p.id.split('@')[0],
+                  pushName: p.notify || null,
+                }
+              }).catch(() => {});
+
+              await prisma.groupParticipant.upsert({
+                where: { chatId_contactId: { chatId: jid, contactId: p.id } },
+                update: { role: p.admin || 'member' },
+                create: { chatId: jid, contactId: p.id, role: p.admin || 'member' }
+              }).catch(() => {});
+
+              if (p.id.endsWith('@lid') && p.jid) {
+                await contactResolver.addMapping(p.id, p.jid);
+              }
+            }
+          }
         }
       }
       console.log(`> Successfully synced ${Object.keys(groups).length} WhatsApp groups! ✅`);
@@ -420,15 +450,10 @@ export class WhatsAppService {
     return this.status === 'connected' && !!this.sock;
   }
 
-  public async sendMessage(chatId: string, text: string, options?: any) {
+  public async sendMessage(chatId: string, text: string, mentions?: string[]) {
     if (!this.isConnected()) throw new Error('WhatsApp not connected');
     
-    const sendOptions: any = { text };
-    if (options?.mentions && options.mentions.length > 0) {
-      sendOptions.mentions = options.mentions;
-    }
-    
-    return await this.sock.sendMessage(chatId, sendOptions);
+    return await this.sock.sendMessage(chatId, { text, mentions: mentions || [] });
   }
 
   public async getChats() {

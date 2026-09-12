@@ -1,9 +1,11 @@
 'use client';
 
 import { cn, formatTime } from '../../lib/utils';
-import { FileText, Image as ImageIcon, Play, CheckCheck, CornerDownRight } from 'lucide-react';
+import { FileText, Image as ImageIcon, Play, CheckCheck, CornerDownRight, Pin } from 'lucide-react';
+import { useState } from 'react';
 
 export default function MessageBubble({ message, isOwn, onCreateTask }: { message: any, isOwn: boolean, onCreateTask: () => void }) {
+  const [isHovered, setIsHovered] = useState(false);
   const senderDisplay = message.senderName || message.sender?.pushName || message.sender?.displayName || (message.senderId && !message.senderId.includes('@g.us') ? message.senderId.split('@')[0] : null);
 
   const renderContent = () => {
@@ -69,15 +71,32 @@ export default function MessageBubble({ message, isOwn, onCreateTask }: { messag
 
   return (
     <div
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onContextMenu={(e) => {
         e.preventDefault();
         if (!message.task) onCreateTask();
       }}
       className={cn(
-        "relative max-w-[75%] rounded-lg px-3.5 py-2 mb-2 text-sm text-[#E9EDEF] shadow-md",
+        "relative max-w-[75%] rounded-lg px-3.5 py-2 mb-2 text-sm text-[#E9EDEF] shadow-md group",
         isOwn ? "self-end bg-[#005C4B] rounded-tr-none" : "self-start bg-[#202C33] rounded-tl-none border border-[#222E35]"
       )}
     >
+      {/* Pin Button on Hover */}
+      {!message.task && (
+        <button 
+          onClick={onCreateTask}
+          className={cn(
+            "absolute -top-2 rounded-full p-1 bg-[#2A3942] border border-[#222E35] text-[#8696A0] hover:text-[#00A884] transition-opacity shadow-md z-10",
+            isHovered ? "opacity-100" : "opacity-0",
+            isOwn ? "-left-2" : "-right-2"
+          )}
+          title="Görevi Oluştur"
+        >
+          <Pin className="w-3.5 h-3.5" />
+        </button>
+      )}
+
       {!isOwn && senderDisplay && (
         <div className="text-xs font-semibold text-emerald-400 mb-1">{senderDisplay}</div>
       )}
@@ -90,7 +109,7 @@ export default function MessageBubble({ message, isOwn, onCreateTask }: { messag
       </div>
 
       {message.task && (
-        <div className="mt-2 rounded bg-black/30 p-2 text-xs border border-white/10 cursor-pointer hover:bg-black/40 transition-colors">
+        <div onClick={onCreateTask} className="mt-2 rounded bg-black/30 p-2 text-xs border border-white/10 cursor-pointer hover:bg-black/40 transition-colors">
           <div className="font-semibold text-[#00A884] mb-1 truncate">📋 {message.task.title}</div>
           <div className="flex space-x-2">
             <span className="rounded bg-blue-900/60 px-1.5 py-0.5 text-blue-200 text-[10px]">{message.task.status}</span>

@@ -1,27 +1,29 @@
 import { Router } from 'express';
 import { prisma } from '../../src/lib/prisma';
 import { messageService } from '../services/message.service';
+import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const chats = await prisma.chat.findMany({
       orderBy: { updatedAt: 'desc' },
       include: {
         _count: {
           select: { tasks: true }
+        },
+        messages: {
+          orderBy: { timestamp: 'desc' },
+          take: 1
         }
       }
     });
 
-    const chatsWithLastMessage = await Promise.all(chats.map(async (chat) => {
-      const lastMessage = await prisma.message.findFirst({
-        where: { chatId: chat.id },
-        orderBy: { timestamp: 'desc' }
-      });
-      return { ...chat, lastMessage };
-    }));
+    const chatsWithLastMessage = chats.map((chat) => {
+      const { messages, ...rest } = chat as any;
+      return { ...rest, lastMessage: messages[0] || null };
+    });
 
     res.json(chatsWithLastMessage);
   } catch (error) {
@@ -29,7 +31,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/:chatId/messages', async (req, res) => {
+router.get('/:chatId/messages', requireAuth, async (req, res) => {
   try {
     const { chatId } = req.params;
     const page = parseInt(req.query.page as string) || 1;
@@ -42,7 +44,7 @@ router.get('/:chatId/messages', async (req, res) => {
   }
 });
 
-router.get('/:chatId/tasks', async (req, res) => {
+router.get('/:chatId/tasks', requireAuth, async (req, res) => {
   try {
     const { chatId } = req.params;
     const tasks = await prisma.task.findMany({
@@ -64,23 +66,34 @@ router.get('/:chatId/tasks', async (req, res) => {
   }
 });
 
-router.get('/:chatId/contacts', async (req, res) => {
+router.get('/:chatId/contacts', requireAuth, async (req, res) => {
   try {
     const { chatId } = req.params;
     
-    // Get unique sender IDs from messages in this chat
-    const messages = await prisma.message.findMany({
+    // Try GroupParticipant first
+    const participants = await prisma.groupParticipant.findMany({
+      where: { chatId },
+      include: { contact: true }
+    });
+    if (participants.length > 0) {
+      return res.json(participants.map(p => ({
+        id: p.contact.id,
+        phoneNumber: p.contact.phoneNumber,
+        pushName: p.contact.pushName,
+        displayName: p.contact.displayName,
+        role: p.role
+      })));
+    }
+    
+    // Fallback: unique message senders
+    const senders = await prisma.message.findMany({
       where: { chatId, senderId: { not: null } },
       select: { senderId: true },
       distinct: ['senderId']
     });
 
-    const senderIds = messages
-      .map(m => m.senderId)
-      .filter((id): id is string => Boolean(id));
-
     const contacts = await prisma.contact.findMany({
-      where: { id: { in: senderIds } }
+      where: { id: { in: senders.map(s => s.senderId!).filter(Boolean) } }
     });
 
     res.json(contacts);

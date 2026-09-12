@@ -38,9 +38,10 @@ export const setupSockets = (io: Server) => {
       socket.leave(`chat_${chatId}`);
     });
 
-    socket.on('send_message', async (data: { chatId: string, text: string }) => {
+    socket.on('send_message', async (data: { chatId: string, text?: string, body?: string }) => {
       try {
-        const { chatId, text } = data;
+        const { chatId } = data;
+        const text = data.text || data.body || '';
         await whatsappService.sendMessage(chatId, text);
       } catch (error) {
         console.error('Send message error:', error);

@@ -1,9 +1,11 @@
 import { prisma } from '../../src/lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
+import { whatsappService } from './whatsapp.service';
+import { contactResolver } from './contact-resolver.service';
 
 export const taskService = {
-  async createTask(data: CreateTaskRequest & { createdBy?: string }) {
-    return await prisma.task.create({
+  async createTask(data: CreateTaskRequest & { createdBy?: string, notifyOnCreate?: boolean }) {
+    const task = await prisma.task.create({
       data: {
         title: data.title,
         description: data.description || null,
@@ -13,6 +15,7 @@ export const taskService = {
         priority: data.priority || 'MEDIUM',
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         createdBy: data.createdBy || null,
+        notifyOnCreate: data.notifyOnCreate !== false,
         assignees: {
           create: (data.assigneeIds || []).map(contactId => ({
             contactId
@@ -29,6 +32,34 @@ export const taskService = {
         sourceMessage: true
       }
     });
+
+    if (data.notifyOnCreate !== false && task.chatId) {
+      try {
+        const assigneeContacts = await prisma.taskAssignee.findMany({
+          where: { taskId: task.id },
+          include: { contact: true }
+        });
+        
+        const assigneeNames = assigneeContacts.map(a => a.contact.pushName || a.contact.phoneNumber).join(', ');
+        const mentions = contactResolver.resolveMentions(assigneeContacts.map(a => a.contactId));
+        
+        const priorityEmoji: Record<string, string> = { LOW: '🟢', MEDIUM: '🟡', HIGH: '🟠', URGENT: '🔴' };
+        const dueDateStr = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Belirtilmedi';
+        
+        let message = `📌 *Yeni Görev Oluşturuldu!*\n\n`;
+        message += `📋 *${task.title}*\n`;
+        if (task.description) message += `📝 ${task.description}\n`;
+        message += `⚡ Öncelik: ${priorityEmoji[task.priority] || '🟡'} ${task.priority}\n`;
+        message += `📅 Bitiş: ${dueDateStr}\n`;
+        if (assigneeNames) message += `👤 Görevliler: ${assigneeNames}\n`;
+        
+        await whatsappService.sendMessage(task.chatId, message, mentions);
+      } catch (e) {
+        console.error('Task WA notification error:', e);
+      }
+    }
+
+    return task;
   },
 
   async updateTask(id: string, data: UpdateTaskRequest) {
@@ -39,7 +70,7 @@ export const taskService = {
       updateData.dueDate = updateData.dueDate ? new Date(updateData.dueDate) : null;
     }
 
-    return await prisma.$transaction(async (tx) => {
+    const updatedTask = await prisma.$transaction(async (tx) => {
       if (data.assigneeIds !== undefined) {
         await tx.taskAssignee.deleteMany({
           where: { taskId: id }
@@ -69,6 +100,22 @@ export const taskService = {
         }
       });
     });
+
+    if (data.status === 'DONE' && updatedTask.chatId) {
+      try {
+        const assignees = await prisma.taskAssignee.findMany({
+          where: { taskId: id },
+          include: { contact: true }
+        });
+        const mentions = contactResolver.resolveMentions(assignees.map(a => a.contactId));
+        const message = `✅ *Görev Tamamlandı!*\n\n📋 *${updatedTask.title}*\nDurum: ✅ Tamamlandı`;
+        await whatsappService.sendMessage(updatedTask.chatId, message, mentions);
+      } catch (e) {
+        console.error('Task completion WA notification error:', e);
+      }
+    }
+
+    return updatedTask;
   },
 
   async deleteTask(id: string) {

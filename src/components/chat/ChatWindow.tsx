@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Send, Image as ImageIcon, FileText, Users } from 'lucide-react';
+import { Send, Users } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import CreateTaskModal from '../task/CreateTaskModal';
 import { getSocket } from '../../lib/socket';
@@ -10,10 +10,11 @@ interface ChatWindowProps {
   chatId: string;
   chatName?: string;
   messages: any[];
-  onCreateTask: (messageId: string) => void;
+  contacts?: any[];
+  myJid?: string;
 }
 
-export default function ChatWindow({ chatId, chatName, messages, onCreateTask }: ChatWindowProps) {
+export default function ChatWindow({ chatId, chatName, messages, contacts = [], myJid = '' }: ChatWindowProps) {
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -33,12 +34,19 @@ export default function ChatWindow({ chatId, chatName, messages, onCreateTask }:
   };
 
   const handleContextMenuTask = (msg: any) => {
-    setSelectedMsgForTask(msg);
+    const senderDisplay = msg.senderName || msg.sender?.pushName || msg.sender?.displayName || (msg.senderId && !msg.senderId.includes('@g.us') ? msg.senderId.split('@')[0] : '');
+    setSelectedMsgForTask({
+      id: msg.id,
+      body: msg.body || msg.quotedText || '',
+      senderName: senderDisplay,
+      timestamp: msg.timestamp
+    });
     setIsTaskModalOpen(true);
   };
 
   const isGroup = chatId.endsWith('@g.us');
-  const isSelf = !isGroup && chatId.includes('905332760534');
+  const userNumber = myJid ? myJid.split('@')[0] : '';
+  const isSelf = !isGroup && userNumber && chatId.includes(userNumber);
   const rawName = chatName && !chatName.includes('@g.us') && !chatName.includes('@s.whatsapp.net') 
     ? chatName 
     : (isGroup ? 'Grup Sohbeti' : (chatId.includes('@') ? chatId.split('@')[0] : chatId));
@@ -94,9 +102,8 @@ export default function ChatWindow({ chatId, chatName, messages, onCreateTask }:
           isOpen={isTaskModalOpen}
           onClose={() => setIsTaskModalOpen(false)}
           chatId={chatId}
-          sourceMessageId={selectedMsgForTask?.id}
-          messageBody={selectedMsgForTask?.body}
-          contacts={[]}
+          sourceMessage={selectedMsgForTask}
+          contacts={contacts}
         />
       )}
     </div>
