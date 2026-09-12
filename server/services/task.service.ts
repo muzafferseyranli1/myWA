@@ -40,18 +40,31 @@ export const taskService = {
           include: { contact: true }
         });
         
-        const assigneeNames = assigneeContacts.map(a => a.contact.pushName || a.contact.phoneNumber).join(', ');
         const mentions = contactResolver.resolveMentions(assigneeContacts.map(a => a.contactId));
         
         const priorityEmoji: Record<string, string> = { LOW: '🟢', MEDIUM: '🟡', HIGH: '🟠', URGENT: '🔴' };
+        const priorityLabel: Record<string, string> = { LOW: 'Düşük', MEDIUM: 'Orta', HIGH: 'Yüksek', URGENT: 'Acil' };
         const dueDateStr = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Belirtilmedi';
+        
+        // Build assignee mention tags: @905332760534
+        const assigneeTags = assigneeContacts.map(a => {
+          const jid = contactResolver.resolveToMentionJid(a.contactId);
+          if (jid) return `@${jid.split('@')[0]}`;
+          return a.contact.pushName || a.contact.phoneNumber;
+        }).join(' ');
         
         let message = `📌 *Yeni Görev Oluşturuldu!*\n\n`;
         message += `📋 *${task.title}*\n`;
         if (task.description) message += `📝 ${task.description}\n`;
-        message += `⚡ Öncelik: ${priorityEmoji[task.priority] || '🟡'} ${task.priority}\n`;
+        message += `⚡ Öncelik: ${priorityEmoji[task.priority] || '🟡'} ${priorityLabel[task.priority] || task.priority}\n`;
         message += `📅 Bitiş: ${dueDateStr}\n`;
-        if (assigneeNames) message += `👤 Görevliler: ${assigneeNames}\n`;
+        if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
+        
+        // Include full source message text
+        const sourceBody = (data as any).sourceMessageBody || task.sourceMessage?.body;
+        if (sourceBody) {
+          message += `\n💬 _Kaynak mesaj:_\n_"${sourceBody}"_`;
+        }
         
         await whatsappService.sendMessage(task.chatId, message, mentions);
       } catch (e) {

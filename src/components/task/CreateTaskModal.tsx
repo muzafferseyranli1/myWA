@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Search } from 'lucide-react';
+import { X, Search, MessageSquareText } from 'lucide-react';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -24,6 +24,9 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
   if (!isOpen) return null;
 
+  // Today's date for min value on date picker
+  const today = new Date().toISOString().split('T')[0];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -37,6 +40,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
         body: JSON.stringify({
           chatId,
           sourceMessageId: sourceMessage?.id,
+          sourceMessageBody: sourceMessage?.body || null,
           title,
           description,
           priority,
@@ -80,25 +84,31 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
         </div>
         
         <div className="overflow-y-auto flex-1 p-4">
+          {/* Mesaj Metni - Readonly, tam metin */}
           {sourceMessage && (
-            <div className="mb-4 rounded-md bg-[#202C33] p-3 text-sm text-[#E9EDEF] border border-[#222E35]">
-              <div className="flex justify-between items-center mb-1">
-                <span className="font-semibold text-[#00A884]">{sourceMessage.senderName}</span>
-                <span className="text-xs text-[#8696A0]">{new Date(sourceMessage.timestamp).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
+            <div className="mb-4">
+              <label className="mb-1 flex items-center gap-1 text-sm text-[#8696A0]">
+                <MessageSquareText className="h-4 w-4" /> Mesaj Metni
+              </label>
+              <div className="rounded-md bg-[#111B21] p-3 text-sm text-[#E9EDEF] border border-[#222E35]">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-semibold text-[#00A884] text-xs">{sourceMessage.senderName}</span>
+                  <span className="text-xs text-[#8696A0]">{new Date(sourceMessage.timestamp).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
+                </div>
+                <div className="text-[#D1D7DB] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto text-[13px] leading-relaxed">{sourceMessage.body}</div>
               </div>
-              <div className="italic text-gray-300 line-clamp-3">{sourceMessage.body}</div>
             </div>
           )}
 
           <form id="create-task-form" onSubmit={handleSubmit} className="flex flex-col space-y-4">
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Görev Başlığı</label>
-              <input required value={title} onChange={e => setTitle(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+              <label className="mb-1 block text-sm text-[#8696A0]">Görev Başlığı *</label>
+              <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Görev için kısa başlık..." className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
             </div>
             
             <div>
               <label className="mb-1 block text-sm text-[#8696A0]">Açıklama</label>
-              <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[80px]" />
+              <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Ek notlar..." rows={2} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] resize-none" />
             </div>
 
             <div>
@@ -119,8 +129,14 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Bitiş Tarihi</label>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+              <label className="mb-1 block text-sm text-[#8696A0]">📅 Bitiş Tarihi</label>
+              <input 
+                type="date" 
+                value={dueDate} 
+                min={today}
+                onChange={e => setDueDate(e.target.value)} 
+                className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] [color-scheme:dark]" 
+              />
             </div>
 
             <div>
@@ -135,6 +151,19 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
                   className="w-full rounded bg-[#111B21] p-2 pl-8 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" 
                 />
               </div>
+              {assigneeIds.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {assigneeIds.map(id => {
+                    const c = contacts.find(x => x.id === id);
+                    return (
+                      <span key={id} className="inline-flex items-center gap-1 rounded-full bg-[#00A884]/20 px-2 py-0.5 text-xs text-[#00A884]">
+                        {c?.pushName || c?.displayName || c?.phoneNumber || id.split('@')[0]}
+                        <button type="button" onClick={() => toggleAssignee(id)} className="hover:text-red-400">×</button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               <div className="max-h-[120px] overflow-y-auto rounded bg-[#111B21] border border-[#222E35] p-2 space-y-1">
                 {filteredContacts.length === 0 && <div className="text-xs text-[#8696A0] p-1">Kişi bulunamadı</div>}
                 {filteredContacts.map(c => (
