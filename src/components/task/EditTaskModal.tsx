@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Trash2, Search } from 'lucide-react';
+import { X, Trash2, Search, Link as LinkIcon, Check } from 'lucide-react';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -17,12 +17,23 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
   const [status, setStatus] = useState(task?.status || 'TODO');
   const [priority, setPriority] = useState(task?.priority || 'MEDIUM');
   const [dueDate, setDueDate] = useState(task?.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
-  const [assigneeIds, setAssigneeIds] = useState<string[]>(task?.assignees?.map((a:any) => a.id) || []);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(
+    task?.assignees?.map((a: any) => a.contactId || a.contact?.id || a.id) || []
+  );
+  const [completionNote, setCompletionNote] = useState(task?.completionNote || '');
   const [searchContact, setSearchContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [showDoneMsg, setShowDoneMsg] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   if (!isOpen || !task) return null;
+
+  const copyTaskLink = () => {
+    const url = `${window.location.origin}/t/${task.id}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +51,8 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
           status,
           priority,
           dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
-          assigneeIds
+          assigneeIds,
+          completionNote: status === 'DONE' ? completionNote : undefined
         })
       });
       if (res.ok) {
@@ -142,8 +154,32 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
               </div>
             </div>
 
+            {status === 'DONE' && (
+              <div className="rounded bg-[#202C33] p-3 border border-[#00A884]/30">
+                <label className="mb-1 block text-xs font-semibold text-[#00A884]">
+                  📝 Görev Bitirme Notu {task.completedBy && `(${task.completedBy})`}
+                </label>
+                <textarea
+                  value={completionNote}
+                  onChange={e => setCompletionNote(e.target.value)}
+                  placeholder="Görev kapatma notu..."
+                  className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[60px]"
+                />
+              </div>
+            )}
+
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Bitiş Tarihi</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-sm text-[#8696A0]">Bitiş Tarihi</label>
+                <button
+                  type="button"
+                  onClick={copyTaskLink}
+                  className="inline-flex items-center gap-1 text-xs text-[#00A884] hover:underline"
+                >
+                  {copiedLink ? <Check className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
+                  {copiedLink ? 'Link Kopyalandı!' : 'Mobil Kapatma Linki'}
+                </button>
+              </div>
               <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
             </div>
 

@@ -148,6 +148,11 @@ export default function KanbanBoard() {
                                   <span className="text-xs text-[#8696A0] inline-block bg-[#111B21] px-1.5 py-0.5 rounded">{task.priority}</span>
                                   {task.dueDate && <span className="text-[11px] text-[#8696A0]">⏱️ {new Date(task.dueDate).toLocaleDateString('tr-TR')}</span>}
                                 </div>
+                                {task.completionNote && (
+                                  <div className="text-[11px] text-green-400 bg-green-500/10 px-2 py-1 rounded line-clamp-2 italic border border-green-500/20">
+                                    📝 {task.completionNote}
+                                  </div>
+                                )}
                                 {task.assignees && task.assignees.length > 0 && (
                                   <div className="flex -space-x-2 mt-1">
                                     {task.assignees.map((a:any) => (

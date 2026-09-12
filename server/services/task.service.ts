@@ -65,6 +65,9 @@ export const taskService = {
         if (sourceBody) {
           message += `\n💬 _Kaynak mesaj:_\n_"${sourceBody}"_`;
         }
+
+        const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
+        message += `\n\n🔗 *Görevi İncele & Kapat:*\n${baseUrl}/t/${task.id}`;
         
         await whatsappService.sendMessage(task.chatId, message, mentions);
       } catch (e) {
@@ -237,5 +240,73 @@ export const taskService = {
         sourceMessage: true
       }
     });
+  },
+
+  async closeTask(id: string, data: { completionNote: string; completedBy?: string }) {
+    const existingTask = await prisma.task.findUnique({
+      where: { id },
+      include: {
+        assignees: { include: { contact: true } },
+        chat: true,
+        sourceMessage: true
+      }
+    });
+
+    if (!existingTask) {
+      throw new Error('Görev bulunamadı');
+    }
+
+    if (existingTask.status === 'DONE') {
+      return existingTask;
+    }
+
+    const completedAt = new Date();
+    const updatedTask = await prisma.task.update({
+      where: { id },
+      data: {
+        status: 'DONE',
+        completionNote: data.completionNote,
+        completedBy: data.completedBy || null,
+        completedAt
+      },
+      include: {
+        assignees: { include: { contact: true } },
+        chat: true,
+        sourceMessage: true
+      }
+    });
+
+    // WhatsApp grubuna detaylı kapanış bildirimi gönder
+    if (updatedTask.chatId) {
+      try {
+        const mentions = contactResolver.resolveMentions(updatedTask.assignees.map(a => a.contactId));
+        const assigneeTags = updatedTask.assignees.map(a => {
+          const jid = contactResolver.resolveToMentionJid(a.contactId);
+          if (jid) return `@${jid.split('@')[0]}`;
+          return a.contact.pushName || a.contact.phoneNumber;
+        }).join(' ');
+
+        const formattedDate = completedAt.toLocaleString('tr-TR', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        let message = `✅ *Görev Tamamlandı ve Kapatıldı!*\n\n`;
+        message += `📋 *${updatedTask.title}*\n`;
+        if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
+        if (data.completedBy) message += `✍️ Kapatan: *${data.completedBy}*\n`;
+        message += `📝 *Kapanış Notu:*\n"${data.completionNote}"\n\n`;
+        message += `⏰ ${formattedDate}`;
+
+        await whatsappService.sendMessage(updatedTask.chatId, message, mentions);
+      } catch (e) {
+        console.error('Task close WA notification error:', e);
+      }
+    }
+
+    return updatedTask;
   }
 };

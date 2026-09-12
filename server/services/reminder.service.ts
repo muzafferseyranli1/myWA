@@ -163,10 +163,11 @@ export const reminderService = {
           
           let message = `⚠️ Sayın ${mentionTag}\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
           
+          const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
           assignTasks.forEach((t, i) => {
             const dueDate = t.dueDate ? t.dueDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
             const days = absDays(t.dueDate!);
-            message += `${i + 1}. 📋 *${t.title}*\n   📅 Bitiş: ${dueDate} | ⏰ ${days} gündür gecikiyor!\n\n`;
+            message += `${i + 1}. 📋 *${t.title}*\n   📅 Bitiş: ${dueDate} | ⏰ ${days} gündür gecikiyor!\n   🔗 Kapat: ${baseUrl}/t/${t.id}\n\n`;
           });
           
           message += `Lütfen en kısa sürede tamamlayın veya durum güncellemesi yapın.`;

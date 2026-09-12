@@ -82,4 +82,38 @@ router.post('/:id/remind', requireAuth, async (req, res) => {
   }
 });
 
+router.get('/:id/public', async (req, res) => {
+  try {
+    const taskId = String(req.params.id);
+    const task = await taskService.getTaskById(taskId);
+    if (!task) {
+      return res.status(404).json({ error: 'Görev bulunamadı' });
+    }
+    res.json(task);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/:id/close', async (req, res) => {
+  try {
+    const taskId = String(req.params.id);
+    const { completionNote, completedBy } = req.body;
+
+    if (!completionNote || !completionNote.trim()) {
+      return res.status(400).json({ error: 'Görev bitirme notu zorunludur' });
+    }
+
+    const task = await taskService.closeTask(taskId, {
+      completionNote: completionNote.trim(),
+      completedBy: completedBy ? String(completedBy).trim() : undefined
+    });
+
+    broadcastTaskUpdated(task);
+    res.json({ success: true, task });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

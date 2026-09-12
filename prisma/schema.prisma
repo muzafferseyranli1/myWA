@@ -134,6 +134,9 @@ model Task {
   dueDate         DateTime?    @map("due_date")
   createdBy       String?      @map("created_by")
   notifyOnCreate  Boolean      @default(true) @map("notify_on_create")
+  completionNote  String?      @map("completion_note")
+  completedAt     DateTime?    @map("completed_at")
+  completedBy     String?      @map("completed_by")
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
 
