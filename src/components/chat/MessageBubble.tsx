@@ -2,11 +2,97 @@
 
 import { cn, formatTime } from '../../lib/utils';
 import { FileText, Image as ImageIcon, Play, CheckCheck, CornerDownRight, Pin } from 'lucide-react';
-import { useState } from 'react';
+import { useState, JSX } from 'react';
 
-export default function MessageBubble({ message, isOwn, onCreateTask }: { message: any, isOwn: boolean, onCreateTask: () => void }) {
+function resolveNameFromContacts(identifier: string, contacts: any[] = []): string | null {
+  if (!identifier) return null;
+  const clean = identifier.trim().replace(/^@/, '');
+  const rawId = clean.split('@')[0];
+  
+  const found = contacts.find(c => {
+    const cId = c.id ? c.id.split('@')[0] : '';
+    const cPhone = c.phoneNumber ? c.phoneNumber.split('@')[0] : '';
+    const cLid = c.lidId ? c.lidId.split('@')[0] : '';
+    return cId === rawId || cPhone === rawId || cLid === rawId || c.id === clean || c.phoneNumber === clean;
+  });
+
+  if (found) {
+    return found.displayName || found.pushName || (found.phoneNumber && found.phoneNumber !== rawId ? found.phoneNumber : null);
+  }
+  return null;
+}
+
+function formatMessageBodyWithMentions(text: string, contacts: any[] = []) {
+  if (!text) return null;
+
+  const mentionRegex = /@(\d{9,16})/g;
+  if (!mentionRegex.test(text)) {
+    return text;
+  }
+
+  const parts: (string | JSX.Element)[] = [];
+  let lastIndex = 0;
+  let match;
+  mentionRegex.lastIndex = 0;
+
+  while ((match = mentionRegex.exec(text)) !== null) {
+    const rawNumber = match[1];
+    const resolvedName = resolveNameFromContacts(rawNumber, contacts);
+    
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+
+    if (resolvedName) {
+      parts.push(
+        <span 
+          key={match.index} 
+          className="inline-flex items-center font-semibold text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 px-1.5 py-0.5 rounded text-xs mx-0.5 shadow-sm"
+          title={`@${rawNumber}`}
+        >
+          @{resolvedName}
+        </span>
+      );
+    } else {
+      parts.push(
+        <span key={match.index} className="font-semibold text-emerald-400/90">
+          @{rawNumber}
+        </span>
+      );
+    }
+
+    lastIndex = mentionRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return parts;
+}
+
+export default function MessageBubble({ 
+  message, 
+  isOwn, 
+  onCreateTask,
+  contacts = []
+}: { 
+  message: any, 
+  isOwn: boolean, 
+  onCreateTask: () => void,
+  contacts?: any[]
+}) {
   const [isHovered, setIsHovered] = useState(false);
-  const senderDisplay = message.senderName || message.sender?.pushName || message.sender?.displayName || (message.senderId && !message.senderId.includes('@g.us') ? message.senderId.split('@')[0] : null);
+  
+  let senderDisplay = message.senderName || message.sender?.pushName || message.sender?.displayName;
+  if (!senderDisplay && message.senderId) {
+    const resolved = resolveNameFromContacts(message.senderId, contacts);
+    senderDisplay = resolved || (!message.senderId.includes('@g.us') ? message.senderId.split('@')[0] : null);
+  }
+
+  const quotedSenderDisplay = message.quotedSender 
+    ? (resolveNameFromContacts(message.quotedSender, contacts) || message.quotedSender)
+    : 'İleti';
 
   const renderContent = () => {
     return (
@@ -21,7 +107,7 @@ export default function MessageBubble({ message, isOwn, onCreateTask }: { messag
           )}>
             <div className="font-semibold text-[11px] text-emerald-400 flex items-center gap-1 mb-0.5">
               <CornerDownRight className="h-3 w-3 inline" />
-              {message.quotedSender ? message.quotedSender : 'İleti'}
+              {quotedSenderDisplay}
             </div>
             <p className="line-clamp-2 text-xs italic text-gray-300">{message.quotedText}</p>
           </div>
@@ -59,9 +145,13 @@ export default function MessageBubble({ message, isOwn, onCreateTask }: { messag
           </div>
         )}
 
-        {/* Text Body */}
-        {message.body && message.body.trim().length > 0 ? (
-          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.body}</div>
+        {/* Text Body with Mention Highlighting */}
+        {message.messageType === 'REACTION' && message.body ? (
+          <div className="italic text-gray-400 text-xs">🫶 {message.body}</div>
+        ) : message.body && message.body.trim().length > 0 ? (
+          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+            {formatMessageBodyWithMentions(message.body, contacts)}
+          </div>
         ) : !message.mediaUrl && !message.quotedText ? (
           <div className="italic text-gray-400 text-xs">💬 (WhatsApp iletisi)</div>
         ) : null}

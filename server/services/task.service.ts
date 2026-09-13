@@ -46,12 +46,12 @@ export const taskService = {
         const priorityLabel: Record<string, string> = { LOW: 'Düşük', MEDIUM: 'Orta', HIGH: 'Yüksek', URGENT: 'Acil' };
         const dueDateStr = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Belirtilmedi';
         
-        // Build assignee mention tags: @905332760534
+        // Build assignee names: Ahmet Hocaoglu, Muzaffer
         const assigneeTags = assigneeContacts.map(a => {
-          const jid = contactResolver.resolveToMentionJid(a.contactId);
-          if (jid) return `@${jid.split('@')[0]}`;
-          return a.contact.pushName || a.contact.phoneNumber;
-        }).join(' ');
+          const name = a.contact.displayName || a.contact.pushName;
+          if (name) return name;
+          return a.contact.phoneNumber ? `@${a.contact.phoneNumber}` : 'Bilinmeyen';
+        }).join(', ');
         
         let message = `📌 *Yeni Görev Oluşturuldu!*\n\n`;
         message += `📋 *${task.title}*\n`;
@@ -66,7 +66,7 @@ export const taskService = {
           message += `\n💬 _Kaynak mesaj:_\n_"${sourceBody}"_`;
         }
 
-        const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
+        const baseUrl = process.env.APP_URL || 'http://188-132-198-144.sslip.io:3060';
         message += `\n\n🔗 *Görevi İncele & Kapat:*\n${baseUrl}/t/${task.id}`;
         
         await whatsappService.sendMessage(task.chatId, message, mentions);
@@ -125,10 +125,10 @@ export const taskService = {
         });
         const mentions = contactResolver.resolveMentions(assignees.map(a => a.contactId));
         const assigneeTags = assignees.map(a => {
-          const jid = contactResolver.resolveToMentionJid(a.contactId);
-          if (jid) return `@${jid.split('@')[0]}`;
-          return a.contact.pushName || a.contact.phoneNumber;
-        }).join(' ');
+          const name = a.contact.displayName || a.contact.pushName;
+          if (name) return name;
+          return a.contact.phoneNumber ? `@${a.contact.phoneNumber}` : 'Bilinmeyen';
+        }).join(', ');
         let message = `✅ *Görev Tamamlandı!*\n\n📋 *${updatedTask.title}*\n`;
         if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
         message += `Durum: ✅ Tamamlandı`;

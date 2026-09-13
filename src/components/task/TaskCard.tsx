@@ -39,7 +39,7 @@ export default function TaskCard({ task, onEdit, onRemind }: { task: any, onEdit
           {task.assignees?.map((a: any, i: number) => {
             const name = a.contact?.displayName || a.contact?.pushName || a.contact?.phoneNumber || 'K';
             return (
-              <div key={i} className="h-5 w-5 rounded-full bg-[#6B7C85] text-[10px] flex items-center justify-center text-white border border-[#202C33]">
+              <div key={i} title={name} className="h-5 w-5 rounded-full bg-[#6B7C85] text-[10px] flex items-center justify-center text-white border border-[#202C33]">
                 {name.substring(0, 2).toUpperCase()}
               </div>
             );

@@ -33,7 +33,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 router.get('/:chatId/messages', requireAuth, async (req, res) => {
   try {
-    const { chatId } = req.params;
+    const chatId = req.params.chatId as string;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
 
@@ -46,7 +46,7 @@ router.get('/:chatId/messages', requireAuth, async (req, res) => {
 
 router.get('/:chatId/tasks', requireAuth, async (req, res) => {
   try {
-    const { chatId } = req.params;
+    const chatId = req.params.chatId as string;
     const tasks = await prisma.task.findMany({
       where: { chatId },
       include: {
@@ -68,7 +68,7 @@ router.get('/:chatId/tasks', requireAuth, async (req, res) => {
 
 router.get('/:chatId/contacts', requireAuth, async (req, res) => {
   try {
-    const { chatId } = req.params;
+    const chatId = req.params.chatId as string;
     
     // Try GroupParticipant first
     const participants = await prisma.groupParticipant.findMany({
@@ -78,6 +78,7 @@ router.get('/:chatId/contacts', requireAuth, async (req, res) => {
     if (participants.length > 0) {
       return res.json(participants.map(p => ({
         id: p.contact.id,
+        lidId: p.contact.lidId,
         phoneNumber: p.contact.phoneNumber,
         pushName: p.contact.pushName,
         displayName: p.contact.displayName,

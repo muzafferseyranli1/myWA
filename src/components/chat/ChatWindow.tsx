@@ -29,7 +29,7 @@ export default function ChatWindow({ chatId, chatName, messages, contacts = [], 
   const handleSend = () => {
     if (!input.trim()) return;
     const sock = getSocket();
-    sock.emit('send_message', { chatId, text: input });
+    sock.emit('send_message', { chatId, body: input });
     setInput('');
   };
 
@@ -76,6 +76,7 @@ export default function ChatWindow({ chatId, chatName, messages, contacts = [], 
                 message={msg} 
                 isOwn={!!msg?.isFromMe} 
                 onCreateTask={() => handleContextMenuTask(msg)} 
+                contacts={contacts}
               />
             </div>
           ))

@@ -213,7 +213,9 @@ export const reminderService = {
       const message = this.generateSummaryMessage(chatTasks);
       
       const allIds = chatTasks.flatMap(t => t.assignees.map(a => a.contact.id));
-      const uniqueMentions = [...new Set(allIds)].map(id => contactResolver.resolveToMentionJid(id));
+      const uniqueMentions = [...new Set(allIds)]
+        .map(id => contactResolver.resolveToMentionJid(id))
+        .filter((jid): jid is string => Boolean(jid));
 
       try {
         await whatsappService.sendMessage(chatIdKey, message, uniqueMentions);

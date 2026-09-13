@@ -1,5 +1,6 @@
 import { prisma } from '../../src/lib/prisma';
 import type { MessageType } from '../../src/lib/types';
+import { contactResolver } from './contact-resolver.service';
 
 export const messageService = {
   async saveMessage(data: any) {
@@ -44,6 +45,18 @@ export const messageService = {
         }
       });
       validSenderId = contact.id;
+      if (senderName || contact.displayName || contact.pushName) {
+        contactResolver.cacheContactName(contact.id, senderName || contact.displayName || contact.pushName || '');
+      }
+    }
+
+    // Resolve quotedSender if it's an ID or phone number
+    let resolvedQuotedSender = quotedSender;
+    if (quotedSender) {
+      const name = await contactResolver.resolveDisplayName(quotedSender);
+      if (name && !name.includes('@')) {
+        resolvedQuotedSender = name;
+      }
     }
 
     // Determine message type
@@ -60,7 +73,7 @@ export const messageService = {
         senderId: isFromMe ? null : validSenderId,
         body: body || '',
         quotedText: quotedText || null,
-        quotedSender: quotedSender || null,
+        quotedSender: resolvedQuotedSender || null,
         messageType: validMessageType,
         mediaUrl: mediaUrl || null,
         mediaName: mediaName || null,
@@ -100,8 +113,25 @@ export const messageService = {
     
     const total = await prisma.message.count({ where: { chatId } });
     
+    const resolvedMessages = await Promise.all(messages.map(async (msg) => {
+      let qSender = msg.quotedSender;
+      if (qSender && (/^\d+$/.test(qSender) || qSender.includes('@'))) {
+        const found = contactResolver.getDisplayNameSync(qSender);
+        if (found) {
+          qSender = found;
+        } else {
+          const resolved = await contactResolver.resolveDisplayName(qSender);
+          if (resolved && !resolved.includes('@')) qSender = resolved;
+        }
+      }
+      return {
+        ...msg,
+        quotedSender: qSender
+      };
+    }));
+
     return {
-      messages: messages.reverse(),
+      messages: resolvedMessages.reverse(),
       total,
       page,
       totalPages: Math.ceil(total / limit)

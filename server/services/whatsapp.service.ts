@@ -19,6 +19,13 @@ function extractMessageBody(msg: any): string {
   const m = msg.message;
   const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
   
+  // Handle reaction messages
+  if (content.reactionMessage) {
+    const emoji = content.reactionMessage.text;
+    if (!emoji) return ''; // Reaction removed
+    return `${emoji} tepki`;
+  }
+  
   if (content.conversation) return content.conversation;
   if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
   if (content.imageMessage?.caption) return content.imageMessage.caption;
@@ -62,6 +69,7 @@ function extractMessageType(msg: any): string {
   const m = msg.message;
   const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
   
+  if (content.reactionMessage) return 'REACTION';
   if (content.imageMessage) return 'IMAGE';
   if (content.videoMessage) return 'VIDEO';
   if (content.audioMessage) return 'AUDIO';

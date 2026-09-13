@@ -9,6 +9,8 @@ export class ContactResolverService {
   private static instance: ContactResolverService;
   // In-memory LID → JID cache
   private lidToJidMap: Map<string, string> = new Map();
+  // In-memory identifier (JID/LID/Phone/raw) → Display Name cache
+  private nameCache: Map<string, string> = new Map();
 
   private constructor() {}
 
@@ -29,6 +31,11 @@ export class ContactResolverService {
           if (contact && (contact as any).lid) {
             this.lidToJidMap.set((contact as any).lid, id);
           }
+          const name = (contact as any)?.name || (contact as any)?.notify || (contact as any)?.verifiedName;
+          if (name) {
+            this.nameCache.set(id, name);
+            this.nameCache.set(id.split('@')[0], name);
+          }
         }
         console.log(`> ContactResolver: Loaded ${this.lidToJidMap.size} LID→JID mappings from store`);
       }
@@ -38,23 +45,37 @@ export class ContactResolverService {
   }
 
   /**
-   * Veritabanındaki lidId alanlarından cache'i yükle
+   * Veritabanından LID→JID ve İsim eşlemelerini yükle
    */
   public async loadFromDatabase() {
     try {
       const contacts = await prisma.contact.findMany({
-        where: { lidId: { not: null } },
-        select: { id: true, lidId: true }
+        select: { id: true, lidId: true, phoneNumber: true, pushName: true, displayName: true }
       });
       for (const c of contacts) {
+        const name = c.displayName || c.pushName;
+        if (name) {
+          this.cacheContactName(c.id, name);
+          if (c.phoneNumber) this.cacheContactName(c.phoneNumber, name);
+          if (c.lidId) this.cacheContactName(c.lidId, name);
+          const rawId = c.id.split('@')[0];
+          this.cacheContactName(rawId, name);
+        }
         if (c.lidId) {
           this.lidToJidMap.set(c.lidId, c.id);
         }
       }
-      console.log(`> ContactResolver: Loaded ${contacts.length} LID→JID mappings from DB`);
+      console.log(`> ContactResolver: Loaded ${contacts.length} contacts (${this.nameCache.size} name keys) from DB`);
     } catch (e) {
       console.error('ContactResolver loadFromDatabase error:', e);
     }
+  }
+
+  public cacheContactName(key: string, name: string) {
+    if (!key || !name) return;
+    this.nameCache.set(key, name);
+    const raw = key.split('@')[0];
+    this.nameCache.set(raw, name);
   }
 
   /**
@@ -85,7 +106,6 @@ export class ContactResolverService {
     if (contactId.endsWith('@lid')) {
       const jid = this.lidToJidMap.get(contactId);
       if (jid && jid.endsWith('@s.whatsapp.net')) return jid;
-      // LID çözülemezse null dön (mention atılamaz)
       return null;
     }
 
@@ -98,16 +118,46 @@ export class ContactResolverService {
   }
 
   /**
-   * Bir contact'ın görüntüleme adını çözümle
+   * Senkron olarak önbellekten isim döndürür, bulunamazsa null
+   */
+  public getDisplayNameSync(contactIdOrPhone: string): string | null {
+    if (!contactIdOrPhone) return null;
+    const clean = contactIdOrPhone.trim();
+    if (this.nameCache.has(clean)) return this.nameCache.get(clean)!;
+    const raw = clean.split('@')[0];
+    if (this.nameCache.has(raw)) return this.nameCache.get(raw)!;
+    return null;
+  }
+
+  /**
+   * Bir contact'ın görüntüleme adını çözümle (Önce cache, sonra DB)
    */
   public async resolveDisplayName(contactId: string): Promise<string> {
+    if (!contactId) return '';
+    const cached = this.getDisplayNameSync(contactId);
+    if (cached) return cached;
+
     try {
-      const contact = await prisma.contact.findUnique({
-        where: { id: contactId },
-        select: { pushName: true, displayName: true, phoneNumber: true }
+      const raw = contactId.split('@')[0];
+      const contact = await prisma.contact.findFirst({
+        where: {
+          OR: [
+            { id: contactId },
+            { id: `${raw}@lid` },
+            { id: `${raw}@s.whatsapp.net` },
+            { phoneNumber: raw },
+            { lidId: contactId },
+            { lidId: `${raw}@lid` }
+          ]
+        },
+        select: { pushName: true, displayName: true, phoneNumber: true, id: true }
       });
       if (contact) {
-        return contact.pushName || contact.displayName || contact.phoneNumber || contactId.split('@')[0];
+        const name = contact.displayName || contact.pushName || contact.phoneNumber || raw;
+        this.cacheContactName(contactId, name);
+        this.cacheContactName(raw, name);
+        this.cacheContactName(contact.id, name);
+        return name;
       }
     } catch (e) {}
     return contactId.split('@')[0];
