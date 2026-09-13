@@ -66,7 +66,7 @@ export const taskService = {
           message += `\n💬 _Kaynak mesaj:_\n_"${sourceBody}"_`;
         }
 
-        const baseUrl = process.env.APP_URL || 'http://mywa.188.132.198.144.sslip.io';
+        const baseUrl = process.env.APP_URL || 'http://188-132-198-144.sslip.io:3060';
         message += `\n\n🔗 *Görevi İncele & Kapat:*\n${baseUrl}/t/${task.id}`;
         
         await whatsappService.sendMessage(task.chatId, message, mentions);

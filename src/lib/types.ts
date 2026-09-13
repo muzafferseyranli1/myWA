@@ -139,7 +139,7 @@ export interface KanbanData {
 
 // ─── WhatsApp Connection Types ───────────────────────
 
-export type WAConnectionStatus = 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready';
+export type WAConnectionStatus = 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready' | 'connected';
 
 export interface WAStatusEvent {
   status: WAConnectionStatus;
