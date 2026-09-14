@@ -283,12 +283,13 @@ export const taskService = {
     // WhatsApp grubuna detaylı kapanış bildirimi gönder
     if (updatedTask.chatId) {
       try {
-        const mentions = contactResolver.resolveMentions(updatedTask.assignees.map(a => a.contactId));
+        const mentionJids: string[] = [];
         const assigneeTags = updatedTask.assignees.map(a => {
-          const jid = contactResolver.resolveToMentionJid(a.contactId);
-          if (jid) return `@${jid.split('@')[0]}`;
-          return a.contact.pushName || a.contact.phoneNumber;
-        }).join(' ');
+          const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact);
+          if (jid) mentionJids.push(jid);
+          return tag;
+        }).filter(Boolean).join(' ');
+        const mentions = [...new Set(mentionJids)];
 
         const formattedDate = completedAt.toLocaleString('tr-TR', {
           day: 'numeric',
