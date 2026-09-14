@@ -84,6 +84,8 @@ export class WhatsAppService {
   private qrcodeDataUrl: string | null = null;
   private status: string = 'disconnected';
   private isInitializing: boolean = false;
+  private logoutRetryCount: number = 0;
+  private static readonly MAX_LOGOUT_RETRIES = 3;
   
   public onQR?: (qr: string) => void;
   public onStatus?: (status: string) => void;
@@ -161,22 +163,38 @@ export class WhatsAppService {
           if (this.onStatus) this.onStatus(this.status);
           
           if (shouldReconnect) {
+            // Normal reconnect (not logout) — clean up old socket first
+            try { this.sock?.ev?.removeAllListeners(); } catch(e) {}
+            try { this.sock?.end?.(undefined); } catch(e) {}
+            this.sock = null;
             setTimeout(() => this.initialize(), 3000);
           } else {
+            // 401 Logged out — clean up old socket, delete session, re-init with retry limit
             console.log('> Session logged out (401). Clearing invalid session files and regenerating QR...');
+            try { this.sock?.ev?.removeAllListeners(); } catch(e) {}
+            try { this.sock?.end?.(undefined); } catch(e) {}
             this.sock = null;
             try {
               if (fs.existsSync(sessionPath)) {
                 fs.rmSync(sessionPath, { recursive: true, force: true });
               }
             } catch (e) {}
-            setTimeout(() => this.initialize(), 1500);
+            
+            this.logoutRetryCount++;
+            if (this.logoutRetryCount <= WhatsAppService.MAX_LOGOUT_RETRIES) {
+              console.log(`> Retry ${this.logoutRetryCount}/${WhatsAppService.MAX_LOGOUT_RETRIES} — re-initializing for fresh QR...`);
+              setTimeout(() => this.initialize(), 2000);
+            } else {
+              console.log('> Max logout retries reached. Waiting for manual reconnect via UI.');
+              this.logoutRetryCount = 0;
+            }
           }
         } else if (connection === 'open') {
           console.log('> WhatsApp Connected successfully! 🎉');
           this.status = 'connected';
           this.qrcodeDataUrl = null;
           this.isInitializing = false;
+          this.logoutRetryCount = 0; // Reset retry counter on successful connection
           if (this.onStatus) this.onStatus(this.status);
           
           // Auto sync groups upon connection
@@ -443,13 +461,16 @@ export class WhatsAppService {
 
   public async disconnect() {
     if (this.sock) {
+      try { this.sock.ev.removeAllListeners(); } catch(e) {}
       try {
         await this.sock.logout();
       } catch (e) {}
+      try { this.sock.end(undefined); } catch(e) {}
       this.sock = null;
       this.status = 'disconnected';
       this.qrcodeDataUrl = null;
       this.isInitializing = false;
+      this.logoutRetryCount = 0;
       if (this.onStatus) this.onStatus(this.status);
     }
   }
@@ -457,9 +478,11 @@ export class WhatsAppService {
   public async resetSession() {
     const sessionPath = process.env.WA_SESSION_PATH || path.join(process.cwd(), '.baileys_auth');
     if (this.sock) {
+      try { this.sock.ev.removeAllListeners(); } catch(e) {}
       try {
         await this.sock.logout();
       } catch (e) {}
+      try { this.sock.end(undefined); } catch(e) {}
       this.sock = null;
     }
     try {
@@ -470,6 +493,7 @@ export class WhatsAppService {
     this.status = 'disconnected';
     this.qrcodeDataUrl = null;
     this.isInitializing = false;
+    this.logoutRetryCount = 0;
     if (this.onStatus) this.onStatus(this.status);
     return this.initialize();
   }
