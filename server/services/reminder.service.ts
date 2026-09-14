@@ -2,6 +2,7 @@ import { whatsappService } from './whatsapp.service';
 import { taskService } from './task.service';
 import { prisma } from '../../src/lib/prisma';
 import { contactResolver } from './contact-resolver.service';
+import { urlShortenerService } from './url-shortener.service';
 
 function daysUntil(date: Date): number {
   const target = new Date(date);
@@ -164,11 +165,13 @@ export const reminderService = {
           let message = `⚠️ Sayın ${mentionTag}\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
           
           const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
-          assignTasks.forEach((t, i) => {
+          for (let i = 0; i < assignTasks.length; i++) {
+            const t = assignTasks[i];
             const dueDate = t.dueDate ? t.dueDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
             const days = absDays(t.dueDate!);
-            message += `${i + 1}. 📋 *${t.title}*\n   📅 Bitiş: ${dueDate} | ⏰ ${days} gündür gecikiyor!\n   🔗 Kapat: ${baseUrl}/t/${t.id}\n\n`;
-          });
+            const shortUrl = await urlShortenerService.shortenUrl(`${baseUrl}/t/${t.id}`);
+            message += `${i + 1}. 📋 *${t.title}*\n   📅 Bitiş: ${dueDate} | ⏰ ${days} gündür gecikiyor!\n   🔗 Kapat: ${shortUrl}\n\n`;
+          }
           
           message += `Lütfen en kısa sürede tamamlayın veya durum güncellemesi yapın.`;
 

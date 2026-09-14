@@ -2,6 +2,7 @@ import { prisma } from '../../src/lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
 import { whatsappService } from './whatsapp.service';
 import { contactResolver } from './contact-resolver.service';
+import { urlShortenerService } from './url-shortener.service';
 
 export const taskService = {
   async createTask(data: CreateTaskRequest & { createdBy?: string, notifyOnCreate?: boolean }) {
@@ -67,7 +68,8 @@ export const taskService = {
         }
 
         const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
-        message += `\n\n🔗 *Görevi İncele & Kapat:*\n${baseUrl}/t/${task.id}`;
+        const taskUrl = await urlShortenerService.shortenUrl(`${baseUrl}/t/${task.id}`);
+        message += `\n\n🔗 *Görevi İncele & Kapat:*\n${taskUrl}`;
         
         await whatsappService.sendMessage(task.chatId, message, mentions);
       } catch (e) {
