@@ -1,4 +1,4 @@
-import { prisma } from '../../src/lib/prisma';
+import { prisma } from '../lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
 import { whatsappService } from './whatsapp.service';
 import { contactResolver } from './contact-resolver.service';
@@ -68,7 +68,7 @@ export const taskService = {
           message += `\n💬 _Kaynak mesaj:_\n_"${sourceBody}"_`;
         }
 
-        const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
+        const baseUrl = process.env.APP_URL!;
         const taskUrl = await urlShortenerService.shortenUrl(`${baseUrl}/t/${task.id}`);
         message += `\n\n🔗 *Görevi İncele & Kapat:*\n${taskUrl}`;
         

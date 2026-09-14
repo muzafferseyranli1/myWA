@@ -6,7 +6,8 @@ WORKDIR /app
 
 # Disable telemetry and set build environment
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_URL="postgresql://mywa:MyWA_Secure_2026!@localhost:5432/mywa"
+# Dummy DATABASE_URL for prisma generate (build-time only, not used at runtime)
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 
 # Copy package manifests
 COPY package.json package-lock.json* ./

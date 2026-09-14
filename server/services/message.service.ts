@@ -1,4 +1,4 @@
-import { prisma } from '../../src/lib/prisma';
+import { prisma } from '../lib/prisma';
 import type { MessageType } from '../../src/lib/types';
 import { contactResolver } from './contact-resolver.service';
 

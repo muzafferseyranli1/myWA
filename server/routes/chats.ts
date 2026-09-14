@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { prisma } from '../../src/lib/prisma';
+import { prisma } from '../lib/prisma';
 import { messageService } from '../services/message.service';
 import { requireAuth } from '../middleware/auth';
 

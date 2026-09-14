@@ -5,7 +5,7 @@ import { Boom } from '@hapi/boom';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import { prisma } from '../../src/lib/prisma';
+import { prisma } from '../lib/prisma';
 import { messageService } from './message.service';
 import { contactResolver } from './contact-resolver.service';
 
@@ -86,7 +86,12 @@ export class WhatsAppService {
   private isInitializing: boolean = false;
   private logoutRetryCount: number = 0;
   private static readonly MAX_LOGOUT_RETRIES = 3;
-  
+
+  // ── Message queue (rate limiting: min 1s between messages) ───────────────
+  private messageQueue: Array<() => Promise<void>> = [];
+  private isProcessingQueue: boolean = false;
+  private static readonly MESSAGE_INTERVAL_MS = 1200; // 1.2s to be safe
+
   public onQR?: (qr: string) => void;
   public onStatus?: (status: string) => void;
   public onMessage?: (msg: any) => void;
@@ -98,6 +103,34 @@ export class WhatsAppService {
       WhatsAppService.instance = new WhatsAppService();
     }
     return WhatsAppService.instance;
+  }
+
+  /** Enqueues a message send action and processes the queue sequentially */
+  private enqueueMessage(action: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.messageQueue.push(async () => {
+        try {
+          await action();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+      this.processQueue();
+    });
+  }
+
+  private async processQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+    while (this.messageQueue.length > 0) {
+      const action = this.messageQueue.shift()!;
+      await action();
+      if (this.messageQueue.length > 0) {
+        await new Promise((r) => setTimeout(r, WhatsAppService.MESSAGE_INTERVAL_MS));
+      }
+    }
+    this.isProcessingQueue = false;
   }
 
   public async initialize() {
@@ -164,21 +197,21 @@ export class WhatsAppService {
           
           if (shouldReconnect) {
             // Normal reconnect (not logout) — clean up old socket first
-            try { this.sock?.ev?.removeAllListeners(); } catch(e) {}
-            try { this.sock?.end?.(undefined); } catch(e) {}
+            try { this.sock?.ev?.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
+            try { this.sock?.end?.(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
             this.sock = null;
             setTimeout(() => this.initialize(), 3000);
           } else {
             // 401 Logged out — clean up old socket, delete session, re-init with retry limit
             console.log('> Session logged out (401). Clearing invalid session files and regenerating QR...');
-            try { this.sock?.ev?.removeAllListeners(); } catch(e) {}
-            try { this.sock?.end?.(undefined); } catch(e) {}
+            try { this.sock?.ev?.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
+            try { this.sock?.end?.(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
             this.sock = null;
             try {
               if (fs.existsSync(sessionPath)) {
                 fs.rmSync(sessionPath, { recursive: true, force: true });
               }
-            } catch (e) {}
+            } catch (e) { console.warn('[WA] Session cleanup error:', e); }
             
             this.logoutRetryCount++;
             if (this.logoutRetryCount <= WhatsAppService.MAX_LOGOUT_RETRIES) {
@@ -461,11 +494,9 @@ export class WhatsAppService {
 
   public async disconnect() {
     if (this.sock) {
-      try { this.sock.ev.removeAllListeners(); } catch(e) {}
-      try {
-        await this.sock.logout();
-      } catch (e) {}
-      try { this.sock.end(undefined); } catch(e) {}
+      try { this.sock.ev.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
+      try { await this.sock.logout(); } catch (e) { console.warn('[WA] logout error:', e); }
+      try { this.sock.end(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
       this.sock = null;
       this.status = 'disconnected';
       this.qrcodeDataUrl = null;
@@ -478,18 +509,16 @@ export class WhatsAppService {
   public async resetSession() {
     const sessionPath = process.env.WA_SESSION_PATH || path.join(process.cwd(), '.baileys_auth');
     if (this.sock) {
-      try { this.sock.ev.removeAllListeners(); } catch(e) {}
-      try {
-        await this.sock.logout();
-      } catch (e) {}
-      try { this.sock.end(undefined); } catch(e) {}
+      try { this.sock.ev.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
+      try { await this.sock.logout(); } catch (e) { console.warn('[WA] logout error:', e); }
+      try { this.sock.end(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
       this.sock = null;
     }
     try {
       if (fs.existsSync(sessionPath)) {
         fs.rmSync(sessionPath, { recursive: true, force: true });
       }
-    } catch (e) {}
+    } catch (e) { console.warn('[WA] Session cleanup error:', e); }
     this.status = 'disconnected';
     this.qrcodeDataUrl = null;
     this.isInitializing = false;
@@ -509,14 +538,12 @@ export class WhatsAppService {
     return this.status === 'connected' && !!this.sock;
   }
 
-  public async sendMessage(chatId: string, text: string, mentions?: string[]) {
-    if (!this.isConnected()) throw new Error('WhatsApp not connected');
-    
-    return await this.sock.sendMessage(chatId, { text, mentions: mentions || [] });
-  }
 
-  public async getChats() {
-    return []; 
+  public async sendMessage(chatId: string, text: string, mentions?: string[]): Promise<void> {
+    if (!this.isConnected()) throw new Error('WhatsApp not connected');
+    return this.enqueueMessage(async () => {
+      await this.sock.sendMessage(chatId, { text, mentions: mentions || [] });
+    });
   }
 }
 

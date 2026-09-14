@@ -1,6 +1,6 @@
 import { whatsappService } from './whatsapp.service';
 import { taskService } from './task.service';
-import { prisma } from '../../src/lib/prisma';
+import { prisma } from '../lib/prisma';
 import { contactResolver } from './contact-resolver.service';
 import { urlShortenerService } from './url-shortener.service';
 
@@ -32,7 +32,7 @@ export const reminderService = {
     const days = task.dueDate ? absDays(new Date(task.dueDate)) : 0;
     const date = task.dueDate ? formatDateTR(new Date(task.dueDate)) : '-';
 
-    const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
+    const baseUrl = process.env.APP_URL!;
     const taskUrl = await urlShortenerService.shortenUrl(`${baseUrl}/t/${task.id}`);
     const linkText = `\n\n🔗 *Görevi İncele & Kapat:*\n${taskUrl}`;
 
@@ -182,7 +182,7 @@ export const reminderService = {
           
           let message = `⚠️ Sayın ${mentionTag}\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
           
-          const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
+          const baseUrl = process.env.APP_URL!;
           for (let i = 0; i < assignTasks.length; i++) {
             const t = assignTasks[i];
             const dueDate = t.dueDate ? t.dueDate.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
@@ -209,7 +209,6 @@ export const reminderService = {
           } catch (err) {
             console.error(`Failed to send overdue reminder to chat ${chatIdKey} for ${assigneeId}:`, err);
           }
-          await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
       return { sent: totalSent, chats: chatCount };
@@ -254,7 +253,6 @@ export const reminderService = {
       } catch (err) {
         console.error(`Failed to send reminder to chat ${chatIdKey}:`, err);
       }
-      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
     return { sent: totalSent, chats: Object.keys(tasksByChat).length };

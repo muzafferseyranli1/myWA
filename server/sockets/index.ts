@@ -2,7 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { authService } from '../services/auth.service';
 import { whatsappService } from '../services/whatsapp.service';
 import { messageService } from '../services/message.service';
-import { prisma } from '../../src/lib/prisma';
+import { prisma } from '../lib/prisma';
 
 let ioInstance: Server | null = null;
 
@@ -57,8 +57,12 @@ export const setupSockets = (io: Server) => {
 
 export const broadcastNewMessage = (message: any) => {
   if (ioInstance) {
-    ioInstance.emit('new_message', message);
-    ioInstance.emit('chat_updated', message.chatId);
+    // Emit to the specific chat room so only clients that joined that chat receive it
+    if (message?.chatId) {
+      ioInstance.to(`chat_${message.chatId}`).emit('new_message', message);
+    }
+    // Always broadcast chat list update to all clients (sidebar refresh)
+    ioInstance.emit('chat_updated', message?.chatId);
   }
 };
 

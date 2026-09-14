@@ -6,7 +6,7 @@ import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
-router.get('/kanban', async (req, res) => {
+router.get('/kanban', requireAuth, async (req, res) => {
   try {
     const { chatId, assigneeId, status, priority } = req.query;
     const data = await taskService.getKanbanData({
@@ -21,7 +21,7 @@ router.get('/kanban', async (req, res) => {
   }
 });
 
-router.get('/overdue', async (req, res) => {
+router.get('/overdue', requireAuth, async (req, res) => {
   try {
     const tasks = await taskService.getOverdueTasks();
     res.json(tasks);
@@ -95,7 +95,7 @@ router.get('/:id/public', async (req, res) => {
   }
 });
 
-router.post('/:id/close', async (req, res) => {
+router.post('/:id/close', requireAuth, async (req, res) => {
   try {
     const taskId = String(req.params.id);
     const { completionNote, completedBy } = req.body;
