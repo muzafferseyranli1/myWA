@@ -37,12 +37,18 @@ export default function ReminderButton({ type, taskId, chatId, onSuccess }: Remi
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('mywa_token')}`
         },
-        body: type === 'single' ? undefined : JSON.stringify(body)
+        body: type === 'single' ? JSON.stringify({}) : JSON.stringify(body)
       });
 
       if (res.ok) {
-        alert('WhatsApp hatırlatma mesajı başarıyla gönderildi ✅');
-        if (onSuccess) onSuccess();
+        const data = await res.json().catch(() => ({}));
+        const sent = data.sent ?? 0;
+        if (sent > 0) {
+          alert(`WhatsApp hatırlatma mesajı başarıyla gönderildi ✅ (${sent} görev)`);
+          if (onSuccess) onSuccess();
+        } else {
+          alert('Hatırlatma gönderilemedi: Görev tamamlanmış veya uygun durumda değil.');
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         alert(`Hata: ${err.error || 'Hatırlatma gönderilemedi'}`);

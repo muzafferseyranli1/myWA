@@ -122,7 +122,9 @@ export const reminderService = {
       state = 'IN_PROGRESS';
     }
 
-    if (!state) return { sent: 0 };
+    // Fallback: görev DONE değil ama hiçbir koşul sağlanmadıysa
+    // (örn. TODO durumuyla, tarihi 3+ gün ileride) yine de gönder
+    if (!state) state = 'IN_PROGRESS';
 
     const { message, mentions } = await this.generateReminderMessage(task, state);
     await whatsappService.sendMessage(task.chatId, message, mentions);
