@@ -163,7 +163,14 @@ export class WhatsAppService {
           if (shouldReconnect) {
             setTimeout(() => this.initialize(), 3000);
           } else {
+            console.log('> Session logged out (401). Clearing invalid session files and regenerating QR...');
             this.sock = null;
+            try {
+              if (fs.existsSync(sessionPath)) {
+                fs.rmSync(sessionPath, { recursive: true, force: true });
+              }
+            } catch (e) {}
+            setTimeout(() => this.initialize(), 1500);
           }
         } else if (connection === 'open') {
           console.log('> WhatsApp Connected successfully! 🎉');
@@ -445,6 +452,26 @@ export class WhatsAppService {
       this.isInitializing = false;
       if (this.onStatus) this.onStatus(this.status);
     }
+  }
+
+  public async resetSession() {
+    const sessionPath = process.env.WA_SESSION_PATH || path.join(process.cwd(), '.baileys_auth');
+    if (this.sock) {
+      try {
+        await this.sock.logout();
+      } catch (e) {}
+      this.sock = null;
+    }
+    try {
+      if (fs.existsSync(sessionPath)) {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+      }
+    } catch (e) {}
+    this.status = 'disconnected';
+    this.qrcodeDataUrl = null;
+    this.isInitializing = false;
+    if (this.onStatus) this.onStatus(this.status);
+    return this.initialize();
   }
 
   public getStatus() {

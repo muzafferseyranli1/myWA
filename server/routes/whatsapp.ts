@@ -9,7 +9,12 @@ router.get('/status', (req, res) => {
 
 router.post('/connect', async (req, res) => {
   try {
-    await whatsappService.initialize();
+    const current = whatsappService.getStatus().status;
+    if (current === 'disconnected' || req.body?.force) {
+      await whatsappService.resetSession();
+    } else {
+      await whatsappService.initialize();
+    }
     res.json({ success: true, status: 'connecting' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
