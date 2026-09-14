@@ -159,8 +159,9 @@ export const reminderService = {
         chatCount++;
         for (const [assigneeId, assignTasks] of Object.entries(assigneesMap)) {
           const contact = assignTasks[0].assignees.find(a => a.contact.id === assigneeId)?.contact;
-          const mentionJid = contactResolver.resolveToMentionJid(assigneeId);
-          const mentionTag = mentionJid ? `@${mentionJid.split('@')[0]}` : (contact?.pushName || contact?.phoneNumber || '');
+          const { tag: mentionTag, jid: mentionJid } = contact 
+            ? contactResolver.resolveAssigneeMention(contact) 
+            : { tag: `@${assigneeId.split('@')[0]}`, jid: contactResolver.resolveToMentionJid(assigneeId) };
           
           let message = `⚠️ Sayın ${mentionTag}\n\nSüresi geçtiği halde tamamlanmayan görevleriniz var:\n\n`;
           

@@ -41,18 +41,19 @@ export const taskService = {
           include: { contact: true }
         });
         
-        const mentions = contactResolver.resolveMentions(assigneeContacts.map(a => a.contactId));
-        
         const priorityEmoji: Record<string, string> = { LOW: '🟢', MEDIUM: '🟡', HIGH: '🟠', URGENT: '🔴' };
         const priorityLabel: Record<string, string> = { LOW: 'Düşük', MEDIUM: 'Orta', HIGH: 'Yüksek', URGENT: 'Acil' };
         const dueDateStr = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Belirtilmedi';
-        
-        // Build assignee names: Ahmet Hocaoglu, Muzaffer
+
+        // Build assignee mention tags: @905332760534 (virgülsüz, boşlukla ayrılmış)
+        const mentionJids: string[] = [];
         const assigneeTags = assigneeContacts.map(a => {
-          const name = a.contact.displayName || a.contact.pushName;
-          if (name) return name;
-          return a.contact.phoneNumber ? `@${a.contact.phoneNumber}` : 'Bilinmeyen';
-        }).join(', ');
+          const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact);
+          if (jid) mentionJids.push(jid);
+          return tag;
+        }).filter(Boolean).join(' ');
+        
+        const mentions = [...new Set(mentionJids)];
         
         let message = `📌 *Yeni Görev Oluşturuldu!*\n\n`;
         message += `📋 *${task.title}*\n`;
@@ -125,12 +126,13 @@ export const taskService = {
           where: { taskId: id },
           include: { contact: true }
         });
-        const mentions = contactResolver.resolveMentions(assignees.map(a => a.contactId));
+        const mentionJids: string[] = [];
         const assigneeTags = assignees.map(a => {
-          const name = a.contact.displayName || a.contact.pushName;
-          if (name) return name;
-          return a.contact.phoneNumber ? `@${a.contact.phoneNumber}` : 'Bilinmeyen';
-        }).join(', ');
+          const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact);
+          if (jid) mentionJids.push(jid);
+          return tag;
+        }).filter(Boolean).join(' ');
+        const mentions = [...new Set(mentionJids)];
         let message = `✅ *Görev Tamamlandı!*\n\n📋 *${updatedTask.title}*\n`;
         if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
         message += `Durum: ✅ Tamamlandı`;

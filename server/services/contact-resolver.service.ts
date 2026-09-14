@@ -171,6 +171,39 @@ export class ContactResolverService {
       .map(id => this.resolveToMentionJid(id))
       .filter((jid): jid is string => jid !== null);
   }
+
+  /**
+   * Bir contact için etiketleme tag'i (@xxx) ve JID bilgisini çözümler.
+   * WhatsApp'ta doğru bildirim ve mavi etiket için @telefon_numarasi döndürür.
+   * Numara bulunamazsa @isim döner.
+   */
+  public resolveAssigneeMention(contact: {
+    id: string;
+    phoneNumber?: string | null;
+    displayName?: string | null;
+    pushName?: string | null;
+  }): { tag: string; jid: string | null } {
+    let jid = this.resolveToMentionJid(contact.id);
+    if (!jid && contact.phoneNumber) {
+      const cleanPhone = contact.phoneNumber.replace(/\D/g, '');
+      if (cleanPhone.length >= 10) {
+        jid = `${cleanPhone}@s.whatsapp.net`;
+        if (contact.id.endsWith('@lid')) {
+          this.addMapping(contact.id, jid);
+        }
+      }
+    }
+    if (!jid && contact.id.endsWith('@s.whatsapp.net')) {
+      jid = contact.id;
+    }
+
+    if (jid) {
+      return { tag: `@${jid.split('@')[0]}`, jid };
+    }
+
+    const name = contact.displayName || contact.pushName || contact.phoneNumber;
+    return { tag: name ? `@${name.trim()}` : '@Bilinmeyen', jid: null };
+  }
 }
 
 export const contactResolver = ContactResolverService.getInstance();
