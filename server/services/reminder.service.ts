@@ -21,24 +21,40 @@ function formatDateTR(date: Date): string {
 }
 
 export const reminderService = {
-  generateReminderMessage(task: any, state: 'OVERDUE' | 'DUE_SOON' | 'IN_PROGRESS'): string {
-    const phones = task.assignees.map((a: any) => {
-      const jid = contactResolver.resolveToMentionJid(a.contact.id);
-      return jid ? `@${jid.split('@')[0]}` : (a.contact.pushName || a.contact.phoneNumber);
-    }).join(' ');
+  async generateReminderMessage(task: any, state: 'OVERDUE' | 'DUE_SOON' | 'IN_PROGRESS'): Promise<{ message: string; mentions: string[] }> {
+    const mentionJids: string[] = [];
+    const phones = (task.assignees || []).map((a: any) => {
+      const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact || { id: a.contactId });
+      if (jid) mentionJids.push(jid);
+      return tag;
+    }).filter(Boolean).join(' ');
+
     const days = task.dueDate ? absDays(new Date(task.dueDate)) : 0;
     const date = task.dueDate ? formatDateTR(new Date(task.dueDate)) : '-';
 
+    const baseUrl = process.env.APP_URL || 'http://188.132.198.144:3060';
+    const taskUrl = await urlShortenerService.shortenUrl(`${baseUrl}/t/${task.id}`);
+    const linkText = `\n\n🔗 *Görevi İncele & Kapat:*\n${taskUrl}`;
+
+    let body = '';
     switch (state) {
       case 'OVERDUE':
-        return `🚨⏰ *HATIRLATMA: Süresi Geçmiş Görev!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n📅 *Son Tarih:* ${date}\n⚠️ *Gecikme:* ${days} gün\n\n❗ Bu görevin süresi geçmiş. Lütfen durumu güncelleyin.`;
+        body = `🚨⏰ *HATIRLATMA: Süresi Geçmiş Görev!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n📅 *Son Tarih:* ${date}\n⚠️ *Gecikme:* ${days} gün\n\n❗ Bu görevin süresi geçmiş. Lütfen durumu güncelleyin.${linkText}`;
+        break;
       case 'DUE_SOON':
-        return `⏳🔔 *HATIRLATMA: Son Tarih Yaklaşıyor!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n💪 Son tarih yaklaşıyor, şimdi harekete geçme zamanı!`;
+        body = `⏳🔔 *HATIRLATMA: Son Tarih Yaklaşıyor!*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n💪 Son tarih yaklaşıyor, şimdi harekete geçme zamanı!${linkText}`;
+        break;
       case 'IN_PROGRESS':
-        return `🔄📊 *DURUM KONTROLÜ*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n🏷️ *Durum:* Devam Ediyor\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n📝 Görev durumunuz hakkında güncelleme paylaşır mısınız?`;
+        body = `🔄📊 *DURUM KONTROLÜ*\n\n📋 *Görev:* ${task.title}\n👤 *Sorumlu:* ${phones}\n🏷️ *Durum:* Devam Ediyor\n📅 *Son Tarih:* ${date}\n⏱️ *Kalan:* ${days} gün\n\n📝 Görev durumunuz hakkında güncelleme paylaşır mısınız?${linkText}`;
+        break;
       default:
-        return '';
+        body = '';
     }
+
+    return {
+      message: body,
+      mentions: [...new Set(mentionJids)]
+    };
   },
 
   generateSummaryMessage(chatTasks: any[]): string {
@@ -108,8 +124,7 @@ export const reminderService = {
 
     if (!state) return { sent: 0 };
 
-    const message = this.generateReminderMessage(task, state);
-    const mentions = contactResolver.resolveMentions(task.assignees.map((a: any) => a.contact.id));
+    const { message, mentions } = await this.generateReminderMessage(task, state);
     await whatsappService.sendMessage(task.chatId, message, mentions);
     
     await prisma.taskReminder.create({
