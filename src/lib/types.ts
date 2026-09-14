@@ -158,6 +158,7 @@ export interface ServerToClientEvents {
   whatsapp_status: (status: WAStatusEvent) => void;
   whatsapp_qr: (qrDataUrl: string) => void;
   reminder_sent: (data: { count: number; tasks: string[] }) => void;
+  chat_updated: (chatId?: string) => void;
 }
 
 export interface ClientToServerEvents {

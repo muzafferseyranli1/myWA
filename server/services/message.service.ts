@@ -65,9 +65,19 @@ export const messageService = {
       validMessageType = messageType as MessageType;
     }
 
-    // Create message record
-    const message = await prisma.message.create({
-      data: {
+    // Create or update message record
+    const message = await prisma.message.upsert({
+      where: { id: id || `${Date.now()}_${Math.random()}` },
+      update: {
+        body: body || '',
+        quotedText: quotedText || null,
+        quotedSender: resolvedQuotedSender || null,
+        messageType: validMessageType,
+        mediaUrl: mediaUrl || null,
+        mediaName: mediaName || null,
+        mediaMime: mediaMime || null,
+      },
+      create: {
         id: id || `${Date.now()}_${Math.random()}`,
         chatId,
         senderId: isFromMe ? null : validSenderId,

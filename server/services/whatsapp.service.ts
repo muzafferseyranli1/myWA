@@ -271,7 +271,7 @@ export class WhatsAppService {
       });
 
       this.sock.ev.on('messages.upsert', async (m: any) => {
-        if (m.type === 'notify' && this.onMessage) {
+        if (this.onMessage && (m.type === 'notify' || m.type === 'append')) {
           for (const msg of m.messages) {
             if (!msg.message) continue;
             
@@ -324,7 +324,7 @@ export class WhatsAppService {
               mediaUrl,
               mediaName,
               mediaMime,
-              isFromMe: msg.key.fromMe,
+              isFromMe: !!msg.key.fromMe,
               timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
             };
             

@@ -83,10 +83,11 @@ export class ContactResolverService {
    */
   public addMapping(lid: string, jid: string) {
     this.lidToJidMap.set(lid, jid);
-    // Veritabanında da güncelle
-    prisma.contact.update({
+    // Veritabanında da güncelle (kayıt yoksa oluşturarak hatayı önle)
+    prisma.contact.upsert({
       where: { id: jid },
-      data: { lidId: lid }
+      update: { lidId: lid },
+      create: { id: jid, lidId: lid, phoneNumber: jid.split('@')[0] }
     }).catch(() => {});
   }
 

@@ -57,7 +57,7 @@ export const setupSockets = (io: Server) => {
 
 export const broadcastNewMessage = (message: any) => {
   if (ioInstance) {
-    ioInstance.to(`chat_${message.chatId}`).emit('new_message', message);
+    ioInstance.emit('new_message', message);
     ioInstance.emit('chat_updated', message.chatId);
   }
 };

@@ -95,9 +95,17 @@ export default function ChatDashboard() {
       setTasks(prev => prev.filter(t => t.id !== taskId));
     };
 
+    const onChatUpdated = (chatId?: string) => {
+      fetchChats();
+      if (chatId && chatId === selectedChatId) {
+        fetchMessagesAndTasks(chatId);
+      }
+    };
+
     sock.on('whatsapp_status', onStatus);
     sock.on('whatsapp_qr', onQR);
     sock.on('new_message', onNewMsg);
+    sock.on('chat_updated', onChatUpdated);
     sock.on('task_created', onTaskCreated);
     sock.on('task_updated', onTaskUpdated);
     sock.on('task_deleted', onTaskDeleted);
@@ -105,13 +113,28 @@ export default function ChatDashboard() {
     fetchChats();
     fetchWaStatus();
 
+    const onFocus = () => {
+      fetchChats();
+      fetchWaStatus();
+      if (selectedChatId) fetchMessagesAndTasks(selectedChatId);
+    };
+    window.addEventListener('focus', onFocus);
+
+    const interval = setInterval(() => {
+      if (selectedChatId) fetchMessagesAndTasks(selectedChatId);
+      fetchChats();
+    }, 10000);
+
     return () => {
       sock.off('whatsapp_status', onStatus);
       sock.off('whatsapp_qr', onQR);
       sock.off('new_message', onNewMsg);
+      sock.off('chat_updated', onChatUpdated);
       sock.off('task_created', onTaskCreated);
       sock.off('task_updated', onTaskUpdated);
       sock.off('task_deleted', onTaskDeleted);
+      window.removeEventListener('focus', onFocus);
+      clearInterval(interval);
     };
   }, [router, selectedChatId]);
 
