@@ -7,3 +7,9 @@ public/uploads/*
 *.log
 dist/
 *.tsbuildinfo
+.expo/
+mobile/.expo/
+mobile/android/
+mobile/ios/
+*.apk
+

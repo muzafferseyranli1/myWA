@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { taskService } from '../services/task.service';
 import { reminderService } from '../services/reminder.service';
 import { broadcastTaskCreated, broadcastTaskUpdated, broadcastTaskDeleted } from '../sockets';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, optionalAuth } from '../middleware/auth';
 
 const router = Router();
 
@@ -95,7 +95,7 @@ router.get('/:id/public', async (req, res) => {
   }
 });
 
-router.post('/:id/close', requireAuth, async (req, res) => {
+router.post('/:id/close', optionalAuth, async (req: any, res) => {
   try {
     const taskId = String(req.params.id);
     const { completionNote, completedBy } = req.body;
