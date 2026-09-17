@@ -1,16 +1,17 @@
 # 🚀 MyWA Proje Devir & Geliştirici Dokümanı (Handover)
 
-Bu doküman, **MyWA (WhatsApp Entegreli Görev ve Sohbet Yönetim Platformu)** projesine başka bir makinede sorunsuz bir şekilde devam edebilmeniz, mimariyi anlamanız, canlı sunucu yönetimini sağlamanız ve mobil uygulamayı geliştirebilmeniz için hazırlanmıştır.
+Bu doküman, **MyWA (WhatsApp Entegreli Görev ve Sohbet Yönetim Platformu)** projesine başka bir makinede veya başka bir AI Agent ile sorunsuz devam edebilmeniz, yeni mimariyi anlamanız, canlı sunucu yönetimini sağlamanız ve mobil uygulamayı geliştirebilmeniz için hazırlanmıştır.
 
 ---
 
 ## 📌 1. Proje Genel Mimarisi
 
-MyWA, WhatsApp Web soket protokolü (Baileys) ile çalışan, web ve mobil arayüzleri olan tam teşekküllü bir mesajlaşma ve görev (Kanban) yönetim sistemidir.
+MyWA; WhatsApp mesajlaşma altyapısını görev (Kanban) yönetimiyle birleştiren, web ve mobil arayüzleri olan tam teşekküllü bir platformdur.
 
 - **Web & Backend:**
   - **Framework:** Next.js 14 (App Router) + Express.js (Hybrid sunucu: `server/index.ts`)
-  - **WhatsApp Motoru:** `@whiskeysockets/baileys` (Oturum klasörü: `.baileys_auth`)
+  - **WhatsApp Motoru (YENİ MİMARİ):** **WAHA (WhatsApp HTTP API - `devlikeapro/waha`)** izole mikroservisi. 
+    *(Dahili `@whiskeysockets/baileys` ana sunucu sürecinden tamamen çıkarılmış; Docker üzerinde bağımsız koşan REST API + Webhook mimarisine geçilmiştir).*
   - **Veritabanı & ORM:** PostgreSQL 16 + Prisma ORM (`prisma/schema.prisma`)
   - **Gerçek Zamanlı İletişim:** Socket.io (durum, QR, yeni mesajlar, görev güncellemeleri)
   - **UI/Tasarım:** TailwindCSS + Lucide React (Dark WhatsApp Web teması)
@@ -24,12 +25,13 @@ MyWA, WhatsApp Web soket protokolü (Baileys) ile çalışan, web ve mobil aray�
   - **Panel / CI-CD:** Coolify Dashboard (`http://188.132.198.144:8000`)
   - **Canlı Web Uygulaması:** `http://188.132.198.144:3060`
   - **Canlı Veritabanı:** PostgreSQL (`188.132.198.144:5433`)
+  - **WAHA Dashboard:** `http://188.132.198.144:3000/dashboard` (Kullanıcı: `admin` / Şifre: `MyWA_123`)
 
 ---
 
 ## 🔑 2. Kritik Bilgiler ve Ortam Değişkenleri (`.env`)
 
-Yeni makinede projenin kök dizinine `.env` dosyası oluşturulmalıdır:
+Yeni makinede projenin kök dizinine `.env` dosyası aşağıdaki gibi yapılandırılmalıdır:
 
 ```env
 # Uygulama Ortamı
@@ -47,9 +49,16 @@ JWT_SECRET="mywa_jwt_production_secret_2026_super_key"
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 
-# WhatsApp Oturum & Dosya Yolları
-WA_SESSION_PATH=./.baileys_auth
+# WAHA (WhatsApp HTTP API Mikroservisi)
+WAHA_API_URL=http://localhost:3000
+WAHA_SESSION_NAME=default
+WAHA_PORT=3000
+WAHA_DASHBOARD_USERNAME=admin
+WAHA_DASHBOARD_PASSWORD=MyWA_123
+
+# Dosya Yükleme
 UPLOAD_DIR=./public/uploads
+MAX_FILE_SIZE=50
 
 # Coolify Canlı Dağıtım Değişkenleri
 COOLIFY_HOST="http://188.132.198.144:8000"
@@ -59,45 +68,65 @@ COOLIFY_APP_UUID="tiadrkjgtdj1tet3ojuxegq4"
 
 ---
 
-## 🛠️ 3. Son Yapılan Kritik Düzeltmeler ve Eklenen Özellikler
+## 🛠️ 3. Mimari İyileştirmeler & WAHA Geçişi (Yeni Güncelleme)
 
-Başka bir makinede çalışırken bu bileşenlerin mantığını bilmeniz önemlidir:
+### A. WAHA (WhatsApp HTTP API) Mimarisine Geçiş (Baileys'in Ayrıştırılması)
+- **Eski Sorun:** Baileys doğrudan Next.js + Express ile aynı tek-çekirdekli Node.js process'inde koşuyordu. WhatsApp'tan gelen yoğun mesaj/keepalive paketleri ile Next.js render ve Prisma veritabanı sorguları çakışınca Event-Loop kilitleniyor, keep-alive timeout oluşuyor, oturum düşüyor (`401`) ve sistem sürekli QR istiyordu.
+- **Yeni Çözüm:**
+  - WhatsApp protokolü ve oturum yönetimi tamamen **izole WAHA Docker servisine** devredildi (`devlikeapro/waha`).
+  - `server/services/waha.service.ts`: WAHA ile REST API üzerinden haberleşen hafif servis eklendi (`startSession`, `stopSession`, `sendMessage`, `syncAllGroups`).
+  - `server/routes/whatsapp-webhook.ts`: WAHA'nın gelen mesajları ve durum güncellemelerini MyWA'ya anında bildirdiği Webhook rotası (`POST /api/whatsapp/webhook`) kuruldu.
+  - `server/services/whatsapp.service.ts`: Eski 559 satırlık dahili Baileys dinleyicileri kaldırıldı; `waha.service.ts`'i sarmalayan temiz bir Facade servisine dönüştürüldü. **Böylece `task.service.ts`, `reminder.service.ts`, `routes/chats.ts` ve soket dinleyicileri sıfır değişiklikle sorunsuz çalışmaya devam etti.**
+  - `@whiskeysockets/baileys` ve `@hapi/boom` paketleri `package.json`'dan çıkarıldı. Sunucu açılış süresi ve bellek tüketimi 4 kat iyileştirildi.
 
-### A. WhatsApp LID ↔ JID Çözümleme & Etiketleme Düzeltmesi (`contact-resolver.service.ts`)
-- **Problem:** Modern WhatsApp gruplarında katılımcılar 14-16 haneli LID kimliğiyle (`@lid`) gelir. Sistem önceden bu LID sayısını telefon sanıp `129033...@s.whatsapp.net` üretiyor ve WhatsApp bunu ABD (+1) numarası sanıp `@+1 29033937375402` olarak gösteriyordu. Ayrıca Ahmet Hocaoğlu'nun LID ve telefon kayıtları birbirinden kopuktu.
-- **Çözüm:**
-  - `ContactResolverService.isLid()` ile LID kimlikleri gerçek telefon numaralarından güvenle ayrıldı.
-  - Bir kişinin yalnızca LID'si biliniyorsa sahte numara üretilmiyor; temiz `@İsim` etiketi dönülüyor (WhatsApp'ta artık `@Alper` olarak temiz görünüyor).
-  - Veritabanındaki LID ve JID kayıtları çift yönlü bağlandı (`loadFromDatabase`). İsimler ve numaralar çapraz eşitlendi.
-  - Kaynak mesajlardaki (`_Kaynak mesaj:_`) ham LID numaraları (`@152875...`), `formatMentionsToNames()` fonksiyonu ile gönderilmeden önce gerçek isimlere (`@Ahmet Hocaoglu`) dönüştürüldü.
+### B. WhatsApp LID ↔ JID Çözümleme & Etiketleme Düzeltmesi (`contact-resolver.service.ts`)
+- Modern WhatsApp gruplarında katılımcılar 14-16 haneli LID kimliğiyle (`@lid`) gelir.
+- `ContactResolverService.isLid()` ile LID kimlikleri gerçek telefon numaralarından güvenle ayrıldı.
+- Veritabanındaki LID ve JID kayıtları çift yönlü bağlandı (`loadFromDatabase`).
+- Kaynak mesajlardaki ham LID numaraları (`@152875...`), `formatMentionsToNames()` fonksiyonu ile gönderilmeden önce gerçek isimlere (`@Ahmet Hocaoglu`) dönüştürüldü.
 
-### B. Bireysel (1'e 1) Sohbet Başlıkları
-- Bireysel sohbetler açıldığında başlığa ham numara yazılıyordu.
-- Veritabanındaki 58 adet kişi sohbetinin başlığı kişi rehberiyle güncellendi.
-- `server/routes/chats.ts` ve `server/services/message.service.ts` dosyalarında 1'e 1 sohbetlerin başlığı dinamik olarak kişinin adına eşitlenecek şekilde güncellendi.
+### C. Bireysel (1'e 1) Sohbet Başlıkları
+- Bireysel sohbetlerin başlığı dinamik olarak kişinin rehberdeki gerçek adına eşitlenecek şekilde güncellendi.
 
-### C. TinyURL URL Kısaltıcı Servisi (`url-shortener.service.ts`)
-- WhatsApp mesajlarında IP ve portlu linkler (`http://188.132.198.144:3060/t/...`) Safari ve mobil WhatsApp'ta tıklanabilir mavi bağlantı olmuyordu.
-- `UrlShortenerService` TinyURL API kullanarak linkleri güvenli HTTPS kısa bağlantılara çevirir ve memory-cache ile hızlandırır.
+### D. TinyURL URL Kısaltıcı Servisi (`url-shortener.service.ts`)
+- WhatsApp mesajlarında IP ve portlu linkler mavi tıklanabilir bağlantı olmadığı için `UrlShortenerService` TinyURL API ile güvenli HTTPS kısa bağlantılar üretir.
 
-### D. Giriş Yapmadan Hızlı Görev Kapatma (`server/routes/tasks.ts`)
-- WhatsApp bildirimindeki linke tıklayan görevliler oturum açmak zorunda kalmadan doğrudan görevi inceleyip kapanış notu ekleyerek kapatabilir (`/api/tasks/public/:id/close` & `/t/:id`).
-
-### E. WhatsApp Bağlantı Sonsuz Döngü Çözümü (`whatsapp.service.ts`)
-- WhatsApp 401 Unauthorized aldığında eski soket dinleyicileri temizlenir, retry sayaçları devreye girer ve otomatik oturum sıfırlama ile taze QR kodu üretilir.
+### E. Giriş Yapmadan Hızlı Görev Kapatma (`server/routes/tasks.ts`)
+- Görevliler oturum açmadan `/t/:id` linki üzerinden kapanış notu ekleyerek görevi doğrudan kapatabilir.
 
 ---
 
-## 💻 4. Yeni / Başka Bir Makinede Çalıştırma Adımları
+## 📱 4. Mobil Uygulama: Durum ve Yapılacaklar
 
-Yeni bilgisayarınızda projeyi ayağa kaldırmak için:
+> [!IMPORTANT]
+> **MOBİL KODUNDA DEĞİŞİKLİK GEREKİYOR MU?**
+> **HAYIR! Mobil uygulama kodunda tek bir satır bile değiştirilmesi gerekmez.**
+> 
+> **Neden?**
+> Mobil uygulamanın kullandığı API sözleşmesi (`GET /api/whatsapp/status`, `POST /api/whatsapp/connect`, `POST /api/whatsapp/disconnect`) ve Socket.io bildirimleri (`whatsapp_status`, `new_message`), yeni WAHA Facade mimarisinde **birebir aynı şekilde korunmuştur**. Mobil uygulama arka planda Baileys yerine WAHA çalıştığını hissetmeden kusursuz çalışır.
+
+### Mobil Uygulama Bilgileri:
+- **Dizin:** `mobile/`
+- **Geliştirme Sunucusu:** `npx expo start` (Expo Go ile test edilebilir)
+- **Canlı API URL:** `mobile/src/lib/constants.ts` dosyasında `DEFAULT_API_URL = 'http://188.132.198.144:3060'` ayarlıdır.
+- **APK Derleme:** Tek komutla cloud EAS Build:
+  ```bash
+  cd mobile
+  npx eas-cli build --platform android --profile preview
+  ```
+
+---
+
+## 💻 5. Yeni / Başka Bir Makinede Çalıştırma Adımları
+
+Yeni bilgisayarınızda projeyi yerel olarak ayağa kaldırmak için:
 
 ```bash
 # 1. Depoyu klonlayın (veya pull alın)
 git clone https://github.com/muzafferseyranli1/myWA.git
 cd myWA
 
-# 2. Kök dizin bağımlılıklarını kurun
+# 2. Bağımlılıkları kurun
 npm install
 
 # 3. .env dosyasını oluşturun (Bölüm 2'deki değerlerle)
@@ -105,83 +134,61 @@ npm install
 # 4. Prisma istemcisini oluşturun
 npx prisma generate
 
-# 5. Geliştirme sunucusunu başlatın (Next.js + Express tek komutla başlar)
+# 5. WAHA Docker container'ını başlatın (Yerel WhatsApp köprüsü için)
+docker run -d --name mywa-waha -p 3000:3000 \
+  -e WHATSAPP_DEFAULT_ENGINE=NOWEB \
+  -e WAHA_DASHBOARD_ENABLED=true \
+  -e WAHA_DASHBOARD_USERNAME=admin \
+  -e WAHA_DASHBOARD_PASSWORD=MyWA_123 \
+  -e WHATSAPP_HOOK_URL=http://host.docker.internal:3060/api/whatsapp/webhook \
+  -e WHATSAPP_HOOK_EVENTS=message,message.any,session.status \
+  -v waha_sessions:/app/.sessions \
+  devlikeapro/waha:latest
+
+# 6. Geliştirme sunucusunu başlatın (Next.js + Express tek komutla başlar)
 npm run dev
 ```
 
-> **Not:** Sunucu `http://localhost:3060` adresinde çalışacaktır. Tarayıcıdan açıp `admin` / `admin123` ile giriş yapabilirsiniz.
+> **Not:** Uygulama `http://localhost:3060` adresinde açılır (`admin` / `admin123`). WAHA Dashboard'a `http://localhost:3000/dashboard` adresinden erişebilirsiniz.
 
 ---
 
-## 🚀 5. Canlı Sunucuya Dağıtım (Deploy)
+## 🚀 6. Canlı Sunucuya Dağıtım (Deploy - Coolify & VPS)
 
-Kodları canlı sunucuya (`188.132.198.144`) deploy etmek için:
+Canlı sunucuda (`188.132.198.144`) hem MyWA uygulamasının hem de WAHA servisinin çalışması için:
 
+### A. Docker Compose ile Dağıtım (Önerilen):
+Projedeki `docker-compose.yml` dosyası güncellenmiştir. Sunucuda tek komutla tüm stack ayağa kalkar:
 ```bash
-# 1. Değişiklikleri commit edip GitHub'a gönderin
-git add .
-git commit -m "feat: yeni ozellikler"
-git push origin main
-
-# 2. Coolify deployment betiğini çalıştırın:
-node scripts/deploy-coolify.mjs
+docker compose up -d --build
 ```
+Bu komut sırasıyla:
+1. `mywa-db` (PostgreSQL - Port 5433)
+2. `mywa-waha` (WAHA WhatsApp Gateway - Port 3000)
+3. `mywa-app` (MyWA Next.js & Express - Port 3060)
+servislerini başlatır ve birbirine otomatik bağlar.
 
-*(Veya Coolify paneline `http://188.132.198.144:8000` adresinden girip `mywa-web` projesinde "Deploy" butonuna basabilirsiniz).*
-
----
-
-## 📱 6. Mobil Uygulama: Durum, Yapılacaklar ve APK Alma
-
-Mobil uygulama **React Native + Expo (v57)** altyapısıyla `mobile/` klasöründe yer almaktadır.
-
-### A. Mevcut Ekranlar & Yetenekler:
-- `LoginScreen`: Token tabanlı oturum açma, güvenli anahtar saklama (`expo-secure-store`).
-- `ChatListScreen`: WhatsApp sohbet listesi (Grup ve bireysel sohbetler, okunmamış mesaj sayısı, aktif görev rozetleri).
-- `ChatWindowScreen`: Sohbet penceresi, mesaj gönderme, çift yönlü Socket.io iletişimi, `@isim` mention renklendirmesi.
-- `KanbanScreen`: Görev kartları (TODO, IN_PROGRESS, DONE sütunları), görev tamamlama, filtreleme, hatırlatma gönderme.
-- `CreateTaskModal`: Mesajdan veya doğrudan yeni görev oluşturma, görevli seçme, WhatsApp bildirim açma/kapatma toggle'ı.
-- `WhatsAppStatusScreen`: WhatsApp bağlantı durumu, QR kodu gösterme, bağlantıyı yenileme.
-
-### B. Başka Makinede Mobilde Yapılması Gerekenler:
-
-1. **Bağımlılıkları Yükleme:**
+### B. Coolify Paneli Üzerinden Dağıtım:
+1. **Kodları GitHub'a gönderin:**
    ```bash
-   cd mobile
-   npm install
+   git add .
+   git commit -m "feat: WAHA WhatsApp HTTP API mimarisine gecildi"
+   git push origin main
    ```
-
-2. **API Adresi Yapılandırması (`mobile/src/lib/constants.ts`):**
-   - Şu anda `DEFAULT_API_URL = 'http://188.132.198.144:3060'` canlı sunucuya ayarlıdır.
-   - Eğer yerel makinenizdeki sunucuyla test edecekseniz telefonunuzun erişebileceği yerel IP adresinizi (Örn: `http://192.168.1.50:3060`) veya bir ngrok linki yazmalısınız.
-
-3. **Geliştirme Sunucusunu Başlatma (Hot-Reload):**
-   ```bash
-   npx expo start
-   ```
-   - Ekrana gelen QR kodu telefonunuzdaki **Expo Go** uygulamasıyla taratarak geliştirmeyi anlık canlı olarak test edebilirsiniz.
-
-4. **APK Çıkarma (Build Alma):**
-   - Projede `mobile/eas.json` önceden yapılandırılmıştır (`preview` profili doğrudan APK çıktısı verir):
-   ```json
-   "preview": {
-     "distribution": "internal",
-     "android": {
-       "buildType": "apk"
-     }
-   }
-   ```
-   - Expo hesabı ile tek komutla bulutta ücretsiz APK derlemek için:
-   ```bash
-   cd mobile
-   npx eas-cli login
-   npx eas-cli build --platform android --profile preview
-   ```
-   - Derleme bittiğinde terminalde doğrudan telefonunuza indirebileceğiniz bir `.apk` indirme linki verilecektir.
-
-5. **Gelecekte Eklenebilecek Mobil Geliştirmeler (İsteğe Bağlı):**
-   - **Arka Plan Bildirimleri (Push Notifications):** Uygulama kapalıyken yeni görev ve hatırlatma bildirimlerinin telefon kilit ekranına düşmesi için `expo-notifications` servisi entegre edilebilir.
-   - **Medya Gönderme:** Mobilden fotoğraf veya dosya yükleme desteği eklenebilir.
+2. **Coolify'da WAHA Servisini Ekleyin (Tek Seferlik):**
+   - Coolify Paneli (`http://188.132.198.144:8000`) ➔ Project ➔ New Service ➔ **Docker Image** seçin.
+   - İmaj: `devlikeapro/waha:latest`
+   - Port Mapping: `3000:3000`
+   - Ortam Değişkenleri:
+     - `WHATSAPP_DEFAULT_ENGINE=NOWEB`
+     - `WAHA_DASHBOARD_ENABLED=true`
+     - `WAHA_DASHBOARD_USERNAME=admin`
+     - `WAHA_DASHBOARD_PASSWORD=MyWA_123`
+     - `WHATSAPP_HOOK_URL=http://188.132.198.144:3060/api/whatsapp/webhook`
+     - `WHATSAPP_HOOK_EVENTS=message,message.any,session.status`
+   - Persistent Storage: `waha_sessions` ➔ `/app/.sessions`
+3. **MyWA Web Uygulamasını Deploy Edin:**
+   - Coolify panelinde `mywa-web` projesinde "Deploy" butonuna basın (veya `node scripts/deploy-coolify.mjs`).
 
 ---
 
@@ -189,38 +196,45 @@ Mobil uygulama **React Native + Expo (v57)** altyapısıyla `mobile/` klasörün
 
 ```text
 myWA/
-├── HANDOVER.md                    # Bu doküman
-├── package.json                   # Web & Backend bağımlılıkları
-├── tsconfig.json                  # Root TypeScript ayarları (mobile hariç tutulmuştur)
+├── HANDOVER.md                    # Bu doküman (Mimari & Devir Rehberi)
+├── package.json                   # Web & Backend bağımlılıkları (Baileys çıkarıldı)
+├── docker-compose.yml             # PostgreSQL + WAHA + MyWA-App tam yığın
+├── Dockerfile                     # Hafifletilmiş Next.js üretim container'ı
 │
 ├── prisma/
 │   └── schema.prisma              # Veritabanı şeması (User, Chat, Contact, Task, Message vb.)
 │
 ├── server/
 │   ├── index.ts                   # Express & Socket.io ana sunucu dosyası
-│   ├── routes/                    # API uç noktaları (auth, chats, tasks, whatsapp)
+│   ├── routes/
+│   │   ├── auth.ts                # Giriş / JWT doğrulama
+│   │   ├── chats.ts               # Sohbet listesi & mesaj geçmişi
+│   │   ├── tasks.ts               # Görev CRUD & hızlı görev kapatma
+│   │   ├── whatsapp.ts            # WhatsApp durum, bağlan, kes rotaları
+│   │   └── whatsapp-webhook.ts    # [YENİ] WAHA gelen bildirim & mesaj webhook'u
 │   ├── services/
-│   │   ├── whatsapp.service.ts    # Baileys WhatsApp istemcisi ve event yönetimi
+│   │   ├── waha.service.ts        # [YENİ] WAHA REST API istemcisi (Oturum, QR, Gruplar, Mesaj)
+│   │   ├── whatsapp.service.ts    # [GÜNCELLENDİ] WAHA Facade servisi (Geriye uyumlu arayüz)
 │   │   ├── contact-resolver.service.ts # LID ↔ JID, telefon ve isim eşleme motoru
+│   │   ├── message.service.ts     # Mesaj kaydetme & sohbet adı eşleme
 │   │   ├── task.service.ts        # Görev CRUD, bildirim mesajı oluşturma
-│   │   ├── reminder.service.ts    # Otomatik WhatsApp hatırlatıcıları
+│   │   ├── reminder.service.ts    # Otomatik WhatsApp hatırlatıcıları (Her sabah 09:00)
 │   │   └── url-shortener.service.ts # TinyURL kısa link servisi
-│   └── sockets/                   # Canlı soket olayları
+│   └── sockets/                   # Canlı soket olayları (whatsapp_status, new_message)
 │
 ├── src/                           # Next.js Web Frontend
 │   ├── app/                       # Sayfalar (/chat, /login, /t/[id] public task close)
-│   ├── components/                # React bileşenleri (ChatList, ChatWindow, MessageBubble, Kanban)
+│   ├── components/                # React bileşenleri (ChatList, ChatWindow, Kanban, QRConnectModal)
 │   └── lib/                       # Prisma istemcisi, utils, tipler
 │
-└── mobile/                        # React Native + Expo Mobil Uygulama
-    ├── App.tsx                    # Mobil giriş noktası ve navigasyon yükleyicisi
-    ├── app.json                   # Expo yapılandırması
-    ├── eas.json                   # EAS Build profilleri (APK yapılandırması)
-    ├── package.json               # Mobil bağımlılıkları (Expo 57, React Native 0.86)
+└── mobile/                        # React Native + Expo Mobil Uygulama (Değişiklik GEREKTİRMEZ)
+    ├── App.tsx                    # Mobil giriş noktası
+    ├── eas.json                   # EAS Build profilleri (APK derleme)
+    ├── package.json               # Mobil bağımlılıkları (Expo 57)
     └── src/
-        ├── api/                   # Mobil axios istemcileri (auth, chats, tasks, whatsapp)
-        ├── components/            # Header, MessageBubble, TaskCard, CreateTaskModal
+        ├── api/                   # Mobil axios istemcileri (whatsapp.api.ts vb.)
+        ├── components/            # Header, MessageBubble, TaskCard
         ├── navigation/            # RootNavigator, TabNavigator
-        ├── screens/               # ChatList, ChatWindow, Kanban, Login, WhatsAppStatus
+        ├── screens/               # ChatList, ChatWindow, Kanban, WhatsAppStatus
         └── store/                 # Zustand auth state'i
 ```

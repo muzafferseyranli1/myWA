@@ -9,6 +9,7 @@ import authRoutes from './routes/auth';
 import chatRoutes from './routes/chats';
 import taskRoutes from './routes/tasks';
 import whatsappRoutes from './routes/whatsapp';
+import whatsappWebhookRoutes from './routes/whatsapp-webhook';
 
 import { setupSockets, broadcastNewMessage, broadcastWhatsAppStatus } from './sockets';
 import { whatsappService } from './services/whatsapp.service';
@@ -85,6 +86,7 @@ app.prepare().then(() => {
   server.use('/api/chats', chatRoutes);
   server.use('/api/tasks', taskRoutes);
   server.use('/api/whatsapp', whatsappRoutes);
+  server.use('/api/whatsapp/webhook', whatsappWebhookRoutes);
 
   // ── Sockets ───────────────────────────────────────────────────────────────
   setupSockets(io);
@@ -92,14 +94,6 @@ app.prepare().then(() => {
   // ── WhatsApp event hooks ──────────────────────────────────────────────────
   whatsappService.onQR = (qr) => broadcastWhatsAppStatus({ status: 'qr', qr });
   whatsappService.onStatus = (status) => broadcastWhatsAppStatus({ status });
-  whatsappService.onMessage = async (msg) => {
-    try {
-      const saved = await messageService.saveMessage(msg);
-      broadcastNewMessage(saved);
-    } catch (err) {
-      console.error('Error handling message:', err);
-    }
-  };
 
   // ── Next.js fallback ──────────────────────────────────────────────────────
   server.all('*', (req, res) => {

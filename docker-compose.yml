@@ -17,6 +17,22 @@ services:
       timeout: 5s
       retries: 5
 
+  mywa-waha:
+    image: devlikeapro/waha:latest
+    container_name: mywa-waha
+    restart: unless-stopped
+    ports:
+      - "${WAHA_PORT:-3000}:3000"
+    environment:
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WAHA_DASHBOARD_ENABLED=true
+      - WAHA_DASHBOARD_USERNAME=${WAHA_DASHBOARD_USERNAME:-admin}
+      - WAHA_DASHBOARD_PASSWORD=${WAHA_DASHBOARD_PASSWORD:-MyWA_123}
+      - WHATSAPP_HOOK_URL=http://mywa-app:3060/api/whatsapp/webhook
+      - WHATSAPP_HOOK_EVENTS=message,message.any,session.status
+    volumes:
+      - mywa_waha_sessions:/app/.sessions
+
   mywa-app:
     build:
       context: .
@@ -32,22 +48,23 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
-      WA_SESSION_PATH: /app/.baileys_auth
+      WAHA_API_URL: http://mywa-waha:3000
       UPLOAD_DIR: /app/public/uploads
       MAX_FILE_SIZE: ${MAX_FILE_SIZE:-50}
       APP_URL: ${APP_URL:?APP_URL is required}
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-*}
     volumes:
       - mywa_uploads:/app/public/uploads
-      - mywa_auth:/app/.baileys_auth
     depends_on:
       mywa-db:
         condition: service_healthy
+      mywa-waha:
+        condition: service_started
 
 volumes:
   mywa_pgdata:
     driver: local
   mywa_uploads:
     driver: local
-  mywa_auth:
+  mywa_waha_sessions:
     driver: local

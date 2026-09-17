@@ -27,7 +27,7 @@ ENV NODE_ENV=production
 ENV PORT=3060
 
 # Ensure runtime directories exist
-RUN mkdir -p /app/.baileys_auth /app/public/uploads
+RUN mkdir -p /app/public/uploads
 
 EXPOSE 3060
 

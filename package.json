@@ -14,10 +14,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@hapi/boom": "^10.0.1",
     "@hello-pangea/dnd": "^17.0.0",
     "@prisma/client": "^5.22.0",
-    "@whiskeysockets/baileys": "^6.7.16",
     "autoprefixer": "^10.4.20",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",

@@ -1,100 +1,26 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage, WAMessage } from '@whiskeysockets/baileys';
-import qrcode from 'qrcode';
-import pino from 'pino';
-import { Boom } from '@hapi/boom';
-import { randomUUID } from 'crypto';
-import path from 'path';
-import fs from 'fs';
-import { prisma } from '../lib/prisma';
-import { messageService } from './message.service';
-import { contactResolver } from './contact-resolver.service';
+import { wahaService } from './waha.service';
 
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
-
-function extractMessageBody(msg: any): string {
-  if (!msg || !msg.message) return '';
-  const m = msg.message;
-  const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
-  
-  // Handle reaction messages
-  if (content.reactionMessage) {
-    const emoji = content.reactionMessage.text;
-    if (!emoji) return ''; // Reaction removed
-    return `${emoji} tepki`;
-  }
-  
-  if (content.conversation) return content.conversation;
-  if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
-  if (content.imageMessage?.caption) return content.imageMessage.caption;
-  if (content.videoMessage?.caption) return content.videoMessage.caption;
-  if (content.documentMessage?.caption) return content.documentMessage.caption;
-  if (content.buttonsResponseMessage?.selectedDisplayText) return content.buttonsResponseMessage.selectedDisplayText;
-  if (content.listResponseMessage?.title) return content.listResponseMessage.title;
-  if (content.templateButtonReplyMessage?.selectedId) return content.templateButtonReplyMessage.selectedId;
-  return '';
-}
-
-function extractQuotedInfo(msg: any): { quotedText: string | null; quotedSender: string | null } {
-  if (!msg || !msg.message) return { quotedText: null, quotedSender: null };
-  const m = msg.message;
-  const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
-  
-  const ctx = content.extendedTextMessage?.contextInfo || 
-              content.imageMessage?.contextInfo || 
-              content.videoMessage?.contextInfo || 
-              content.documentMessage?.contextInfo || 
-              content.audioMessage?.contextInfo;
-
-  if (ctx && ctx.quotedMessage) {
-    const q = ctx.quotedMessage;
-    const qText = q.conversation || 
-                  q.extendedTextMessage?.text || 
-                  q.imageMessage?.caption || 
-                  q.videoMessage?.caption || 
-                  q.documentMessage?.caption || 
-                  (q.imageMessage ? '📷 Fotoğraf' : q.videoMessage ? '🎥 Video' : q.audioMessage ? '🎵 Ses Kaydı' : q.documentMessage ? '📄 Belge' : 'İleti');
-    
-    let qSender = ctx.participant ? ctx.participant.split('@')[0] : null;
-    return { quotedText: qText, quotedSender: qSender };
-  }
-
-  return { quotedText: null, quotedSender: null };
-}
-
-function extractMessageType(msg: any): string {
-  if (!msg || !msg.message) return 'TEXT';
-  const m = msg.message;
-  const content = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.documentWithCaptionMessage?.message || m;
-  
-  if (content.reactionMessage) return 'REACTION';
-  if (content.imageMessage) return 'IMAGE';
-  if (content.videoMessage) return 'VIDEO';
-  if (content.audioMessage) return 'AUDIO';
-  if (content.documentMessage) return 'DOCUMENT';
-  if (content.stickerMessage) return 'STICKER';
-  return 'TEXT';
-}
-
+/**
+ * WhatsAppService Facade
+ * Provides backward compatibility for all existing controllers and schedulers
+ * by delegating operations to the isolated WAHA microservice.
+ */
 export class WhatsAppService {
   private static instance: WhatsAppService;
-  private sock: any;
-  private qrcodeDataUrl: string | null = null;
-  private status: string = 'disconnected';
-  private isInitializing: boolean = false;
-  private logoutRetryCount: number = 0;
-  private static readonly MAX_LOGOUT_RETRIES = 3;
 
-  // ── Message queue (rate limiting: min 1s between messages) ───────────────
-  private messageQueue: Array<() => Promise<void>> = [];
-  private isProcessingQueue: boolean = false;
-  private static readonly MESSAGE_INTERVAL_MS = 1200; // 1.2s to be safe
+  public get onQR() {
+    return wahaService.onQR;
+  }
+  public set onQR(fn: ((qr: string) => void) | undefined) {
+    wahaService.onQR = fn;
+  }
 
-  public onQR?: (qr: string) => void;
-  public onStatus?: (status: string) => void;
-  public onMessage?: (msg: any) => void;
+  public get onStatus() {
+    return wahaService.onStatus;
+  }
+  public set onStatus(fn: ((status: string) => void) | undefined) {
+    wahaService.onStatus = fn;
+  }
 
   private constructor() {}
 
@@ -105,572 +31,63 @@ export class WhatsAppService {
     return WhatsAppService.instance;
   }
 
-  /** Enqueues a message send action and processes the queue sequentially */
-  private enqueueMessage(action: () => Promise<void>): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.messageQueue.push(async () => {
-        try {
-          await action();
-          resolve();
-        } catch (err) {
-          reject(err);
-        }
-      });
-      this.processQueue();
-    });
+  /**
+   * Initializes the WhatsApp connection via WAHA
+   */
+  public async initialize(): Promise<void> {
+    console.log('> [WhatsApp] Initializing session via WAHA...');
+    await wahaService.startSession();
   }
 
-  private async processQueue() {
-    if (this.isProcessingQueue) return;
-    this.isProcessingQueue = true;
-    while (this.messageQueue.length > 0) {
-      const action = this.messageQueue.shift()!;
-      await action();
-      if (this.messageQueue.length > 0) {
-        await new Promise((r) => setTimeout(r, WhatsAppService.MESSAGE_INTERVAL_MS));
-      }
-    }
-    this.isProcessingQueue = false;
+  /**
+   * Syncs all participating WhatsApp groups
+   */
+  public async syncAllGroups(): Promise<void> {
+    await wahaService.syncAllGroups();
   }
 
-  public async initialize() {
-    if (this.isInitializing) return;
-    this.isInitializing = true;
-    this.status = 'connecting';
-    if (this.onStatus) this.onStatus(this.status);
-
-    try {
-      const sessionPath = process.env.WA_SESSION_PATH || path.join(process.cwd(), '.baileys_auth');
-      if (!fs.existsSync(sessionPath)) {
-        fs.mkdirSync(sessionPath, { recursive: true });
-      }
-
-      const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-      
-      let version = [2, 3000, 1015901307];
-      try {
-        const v = await fetchLatestBaileysVersion();
-        if (v?.version) version = v.version;
-      } catch (err: any) {
-        console.log('Using default Baileys version:', err.message);
-      }
-      
-      const logger = pino({ level: 'silent' });
-
-      this.sock = makeWASocket({
-        version: version as any,
-        auth: state,
-        printQRInTerminal: false,
-        logger,
-        browser: ['MyWA Web', 'Chrome', '124.0.0.0'],
-        syncFullHistory: true,
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 15000,
-        getMessage: async () => {
-          return { conversation: 'hello' };
-        }
-      });
-
-      this.sock.ev.on('creds.update', saveCreds);
-
-      this.sock.ev.on('connection.update', async (update: any) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if (qr) {
-          console.log('> New WhatsApp QR Generated');
-          this.qrcodeDataUrl = await qrcode.toDataURL(qr);
-          this.status = 'qr';
-          if (this.onQR) this.onQR(this.qrcodeDataUrl);
-          if (this.onStatus) this.onStatus(this.status);
-        }
-
-        if (connection === 'close') {
-          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-          console.log(`> WhatsApp connection closed. Code: ${statusCode}, Reconnect: ${shouldReconnect}`);
-          
-          this.status = 'disconnected';
-          this.qrcodeDataUrl = null;
-          this.isInitializing = false;
-          if (this.onStatus) this.onStatus(this.status);
-          
-          if (shouldReconnect) {
-            // Normal reconnect (not logout) — clean up old socket first
-            try { this.sock?.ev?.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
-            try { this.sock?.end?.(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
-            this.sock = null;
-            setTimeout(() => this.initialize(), 3000);
-          } else {
-            // 401 Logged out — clean up old socket, delete session, re-init with retry limit
-            console.log('> Session logged out (401). Clearing invalid session files and regenerating QR...');
-            try { this.sock?.ev?.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
-            try { this.sock?.end?.(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
-            this.sock = null;
-            try {
-              if (fs.existsSync(sessionPath)) {
-                fs.rmSync(sessionPath, { recursive: true, force: true });
-              }
-            } catch (e) { console.warn('[WA] Session cleanup error:', e); }
-            
-            this.logoutRetryCount++;
-            if (this.logoutRetryCount <= WhatsAppService.MAX_LOGOUT_RETRIES) {
-              console.log(`> Retry ${this.logoutRetryCount}/${WhatsAppService.MAX_LOGOUT_RETRIES} — re-initializing for fresh QR...`);
-              setTimeout(() => this.initialize(), 2000);
-            } else {
-              console.log('> Max logout retries reached. Waiting for manual reconnect via UI.');
-              this.logoutRetryCount = 0;
-            }
-          }
-        } else if (connection === 'open') {
-          console.log('> WhatsApp Connected successfully! 🎉');
-          this.status = 'connected';
-          this.qrcodeDataUrl = null;
-          this.isInitializing = false;
-          this.logoutRetryCount = 0; // Reset retry counter on successful connection
-          if (this.onStatus) this.onStatus(this.status);
-          
-          // Auto sync groups upon connection
-          setTimeout(() => this.syncAllGroups(), 2000);
-          await contactResolver.loadFromDatabase();
-        }
-      });
-
-      // Sync chat and message history
-      this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }: any) => {
-        console.log(`> Syncing history: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts, ${messages?.length || 0} messages`);
-        if (contacts) {
-          for (const con of contacts) {
-            if (con.id) {
-              const isLid = con.id.endsWith('@lid') || contactResolver.isLid(con.id);
-              const phone = !isLid ? con.id.split('@')[0] : '';
-              const name = con.name || con.notify || con.verifiedName;
-              await prisma.contact.upsert({
-                where: { id: con.id },
-                update: {
-                  ...(con.name ? { displayName: con.name } : {}),
-                  ...(con.notify ? { pushName: con.notify } : {}),
-                  ...(phone ? { phoneNumber: phone } : {})
-                },
-                create: {
-                  id: con.id,
-                  pushName: con.notify || con.name || null,
-                  displayName: con.name || con.notify || null,
-                  phoneNumber: phone,
-                  ...(isLid ? { lidId: con.id } : {})
-                }
-              }).catch(() => {});
-
-              if (name) {
-                contactResolver.cacheContactName(con.id, name);
-                if (phone) contactResolver.cacheContactName(phone, name);
-              }
-              if (con.lid && con.id.endsWith('@s.whatsapp.net')) {
-                await contactResolver.addMapping(con.lid, con.id);
-              } else if (con.jid && con.id.endsWith('@lid')) {
-                await contactResolver.addMapping(con.id, con.jid);
-              }
-            }
-          }
-        }
-        if (chats) {
-          for (const c of chats) {
-            if (c.id) {
-              const isGroup = c.id.endsWith('@g.us');
-              const resolved = !isGroup ? contactResolver.getDisplayNameSync(c.id) : null;
-              const name = c.name || resolved || (c.id.includes('@') ? c.id.split('@')[0] : c.id);
-              await prisma.chat.upsert({
-                where: { id: c.id },
-                update: {
-                  ...(c.name || resolved ? { name: c.name || resolved } : {}),
-                  isGroup,
-                  updatedAt: new Date()
-                },
-                create: {
-                  id: c.id,
-                  name,
-                  isGroup,
-                  updatedAt: new Date()
-                }
-              }).catch(() => {});
-            }
-          }
-        }
-        if (messages) {
-          for (const msg of messages) {
-            if (!msg.message || !msg.key?.remoteJid) continue;
-            const text = extractMessageBody(msg);
-            const { quotedText, quotedSender } = extractQuotedInfo(msg);
-            const mType = extractMessageType(msg);
-            const isGroup = msg.key.remoteJid?.endsWith('@g.us');
-            const isFromMe = !!msg.key.fromMe;
-            const senderId = isGroup 
-              ? (msg.key.participant || msg.key.remoteJid) 
-              : (isFromMe ? 'me' : msg.key.remoteJid);
-            const senderPhone = senderId && senderId !== 'me' ? senderId.split('@')[0] : undefined;
-            const chatName = isGroup 
-              ? undefined 
-              : (!isFromMe ? (msg.pushName || undefined) : undefined);
-
-            const parsed = {
-              id: msg.key.id,
-              chatId: msg.key.remoteJid,
-              chatName,
-              isGroup,
-              senderId,
-              senderPhone,
-              senderName: isFromMe ? undefined : msg.pushName,
-              body: text,
-              quotedText,
-              quotedSender,
-              messageType: mType,
-              isFromMe,
-              timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
-            };
-            await messageService.saveMessage(parsed).catch(() => {});
-          }
-        }
-        this.syncAllGroups();
-      });
-
-      this.sock.ev.on('chats.upsert', async (newChats: any[]) => {
-        for (const c of newChats) {
-          if (c.id) {
-            const isGroup = c.id.endsWith('@g.us');
-            const resolved = !isGroup ? contactResolver.getDisplayNameSync(c.id) : null;
-            const existingChat = await prisma.chat.findUnique({ where: { id: c.id } });
-            const validName = c.name || resolved;
-
-            await prisma.chat.upsert({
-              where: { id: c.id },
-              update: {
-                ...(validName ? { name: validName } : {}),
-                isGroup,
-                updatedAt: new Date()
-              },
-              create: {
-                id: c.id,
-                name: validName || (existingChat?.name) || (c.id.includes('@') ? c.id.split('@')[0] : c.id),
-                isGroup,
-                updatedAt: new Date()
-              }
-            }).catch(() => {});
-          }
-        }
-      });
-
-      this.sock.ev.on('contacts.upsert', async (contacts: any[]) => {
-        for (const con of contacts) {
-          if (!con.id) continue;
-          const isLid = con.id.endsWith('@lid') || contactResolver.isLid(con.id);
-          const phone = !isLid ? con.id.split('@')[0] : '';
-          const name = con.name || con.notify || con.verifiedName;
-
-          await prisma.contact.upsert({
-            where: { id: con.id },
-            update: {
-              ...(con.name ? { displayName: con.name } : {}),
-              ...(con.notify ? { pushName: con.notify } : {}),
-              ...(phone ? { phoneNumber: phone } : {})
-            },
-            create: {
-              id: con.id,
-              displayName: con.name || null,
-              pushName: con.notify || con.name || null,
-              phoneNumber: phone,
-              ...(isLid ? { lidId: con.id } : {})
-            }
-          }).catch(() => {});
-
-          if (name) {
-            contactResolver.cacheContactName(con.id, name);
-            if (phone) contactResolver.cacheContactName(phone, name);
-
-            // If the chat has a numeric or empty name, update it with real contact name
-            await prisma.chat.updateMany({
-              where: {
-                id: con.id,
-                OR: [
-                  { name: { contains: '@' } },
-                  { name: con.id.split('@')[0] }
-                ]
-              },
-              data: { name }
-            }).catch(() => {});
-          }
-
-          if (con.lid && con.id.endsWith('@s.whatsapp.net')) {
-            await contactResolver.addMapping(con.lid, con.id);
-          } else if (con.jid && con.id.endsWith('@lid')) {
-            await contactResolver.addMapping(con.id, con.jid);
-          }
-        }
-      });
-
-      this.sock.ev.on('contacts.update', async (updates: any[]) => {
-        for (const update of updates) {
-          if (!update.id) continue;
-          const name = update.name || update.notify;
-          await prisma.contact.update({
-            where: { id: update.id },
-            data: {
-              ...(update.name ? { displayName: update.name } : {}),
-              ...(update.notify ? { pushName: update.notify } : {})
-            }
-          }).catch(() => {});
-
-          if (name) {
-            contactResolver.cacheContactName(update.id, name);
-            await prisma.chat.updateMany({
-              where: {
-                id: update.id,
-                OR: [
-                  { name: { contains: '@' } },
-                  { name: update.id.split('@')[0] }
-                ]
-              },
-              data: { name }
-            }).catch(() => {});
-          }
-        }
-      });
-
-      this.sock.ev.on('chats.phoneNumberShare', async ({ lid, jid }: any) => {
-        if (lid && jid) {
-          await contactResolver.addMapping(lid, jid);
-        }
-      });
-
-      this.sock.ev.on('messages.upsert', async (m: any) => {
-        if (this.onMessage && (m.type === 'notify' || m.type === 'append')) {
-          for (const msg of m.messages) {
-            if (!msg.message) continue;
-            
-            let mediaUrl = null;
-            let mediaName = null;
-            let mediaMime = null;
-            
-            const innerMsg = msg.message?.ephemeralMessage?.message || msg.message?.viewOnceMessage?.message || msg.message?.viewOnceMessageV2?.message || msg.message?.documentWithCaptionMessage?.message || msg.message;
-            const isMedia = innerMsg?.imageMessage || innerMsg?.videoMessage || innerMsg?.audioMessage || innerMsg?.documentMessage;
-            
-            if (isMedia) {
-              try {
-                const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
-                  logger,
-                  reuploadRequest: this.sock?.updateMediaMessage
-                } as any);
-                const ext = this.getExtension(innerMsg);
-                const filename = `${randomUUID()}${ext}`;
-                const filepath = path.join(UPLOAD_DIR, filename);
-                fs.writeFileSync(filepath, buffer);
-                mediaUrl = `/uploads/${filename}`;
-                mediaName = filename;
-                mediaMime = this.getMime(innerMsg);
-              } catch (err) {
-                console.error('Media download error:', err);
-              }
-            }
-            
-            const text = extractMessageBody(msg);
-            const { quotedText, quotedSender } = extractQuotedInfo(msg);
-            const mType = extractMessageType(msg);
-
-            const isGroup = msg.key.remoteJid?.endsWith('@g.us');
-            const isFromMe = !!msg.key.fromMe;
-            const senderId = isGroup 
-              ? (msg.key.participant || msg.key.remoteJid) 
-              : (isFromMe ? 'me' : msg.key.remoteJid);
-            const senderPhone = senderId && senderId !== 'me' ? senderId.split('@')[0] : undefined;
-
-            // In 1-on-1 chats:
-            // If fromMe: msg.pushName is the LOGGED IN USER, NEVER the chat name!
-            // If !fromMe: msg.pushName is the other person's push name!
-            const chatName = isGroup 
-              ? undefined 
-              : (!isFromMe ? (msg.pushName || undefined) : undefined);
-
-            const parsedMsg = {
-              id: msg.key.id,
-              chatId: msg.key.remoteJid,
-              chatName,
-              isGroup,
-              senderId,
-              senderPhone,
-              senderName: isFromMe ? undefined : msg.pushName,
-              body: text,
-              quotedText,
-              quotedSender,
-              messageType: mType,
-              mediaUrl,
-              mediaName,
-              mediaMime,
-              isFromMe,
-              timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
-            };
-            
-            this.onMessage(parsedMsg);
-
-            // If it's a group and we don't have its proper subject, fetch it
-            if (isGroup) {
-              this.fetchAndSaveGroupMetadata(msg.key.remoteJid);
-            }
-          }
-        }
-      });
-    } catch (error) {
-      console.error('WhatsApp initialization fatal error:', error);
-      this.status = 'disconnected';
-      this.isInitializing = false;
-      if (this.onStatus) this.onStatus(this.status);
-    }
+  /**
+   * Fetches metadata for a single group and saves to database
+   */
+  public async fetchAndSaveGroupMetadata(groupJid: string): Promise<void> {
+    await wahaService.fetchAndSaveGroupMetadata(groupJid);
   }
 
-  public async syncAllGroups() {
-    if (!this.sock) return;
-    try {
-      console.log('> Fetching all participating groups...');
-      const groups = await this.sock.groupFetchAllParticipating();
-      for (const [jid, metadata] of Object.entries(groups as any)) {
-        if (metadata && (metadata as any).subject) {
-          await prisma.chat.upsert({
-            where: { id: jid },
-            update: {
-              name: (metadata as any).subject,
-              isGroup: true,
-              updatedAt: new Date()
-            },
-            create: {
-              id: jid,
-              name: (metadata as any).subject,
-              isGroup: true,
-              updatedAt: new Date()
-            }
-          }).catch(() => {});
-
-          if ((metadata as any).participants) {
-            for (const p of (metadata as any).participants) {
-              const isLidP = p.id?.endsWith('@lid') || contactResolver.isLid(p.id);
-              const pPhone = !isLidP ? p.id?.split('@')[0] : '';
-              await prisma.contact.upsert({
-                where: { id: p.id },
-                update: {
-                  ...(pPhone ? { phoneNumber: pPhone } : {}),
-                  ...(p.notify && { pushName: p.notify })
-                },
-                create: {
-                  id: p.id,
-                  phoneNumber: pPhone,
-                  pushName: p.notify || null,
-                  ...(isLidP ? { lidId: p.id } : {})
-                }
-              }).catch(() => {});
-
-              await prisma.groupParticipant.upsert({
-                where: { chatId_contactId: { chatId: jid, contactId: p.id } },
-                update: { role: p.admin || 'member' },
-                create: { chatId: jid, contactId: p.id, role: p.admin || 'member' }
-              }).catch(() => {});
-
-              if (p.id?.endsWith('@lid') && p.jid) {
-                await contactResolver.addMapping(p.id, p.jid);
-              } else if (p.lid && p.id?.endsWith('@s.whatsapp.net')) {
-                await contactResolver.addMapping(p.lid, p.id);
-              }
-            }
-          }
-        }
-      }
-      console.log(`> Successfully synced ${Object.keys(groups).length} WhatsApp groups! ✅`);
-    } catch (err: any) {
-      console.error('Error syncing groups:', err.message);
-    }
+  /**
+   * Disconnects the WhatsApp session
+   */
+  public async disconnect(): Promise<void> {
+    console.log('> [WhatsApp] Stopping session via WAHA...');
+    await wahaService.stopSession();
   }
 
-  public async fetchAndSaveGroupMetadata(groupJid: string) {
-    if (!this.sock) return;
-    try {
-      const meta = await this.sock.groupMetadata(groupJid);
-      if (meta && meta.subject) {
-        await prisma.chat.upsert({
-          where: { id: groupJid },
-          update: { name: meta.subject, isGroup: true },
-          create: { id: groupJid, name: meta.subject, isGroup: true }
-        });
-      }
-    } catch (e) {}
-  }
-  
-  private getExtension(message: any) {
-    if (message.imageMessage) return '.jpg';
-    if (message.videoMessage) return '.mp4';
-    if (message.audioMessage) return '.ogg';
-    if (message.documentMessage) {
-      const parts = message.documentMessage.fileName?.split('.');
-      return parts ? `.${parts[parts.length - 1]}` : '.bin';
-    }
-    return '.bin';
-  }
-  
-  private getMime(message: any) {
-    if (message.imageMessage) return message.imageMessage.mimetype;
-    if (message.videoMessage) return message.videoMessage.mimetype;
-    if (message.audioMessage) return message.audioMessage.mimetype;
-    if (message.documentMessage) return message.documentMessage.mimetype;
-    return 'application/octet-stream';
+  /**
+   * Resets / restarts the WhatsApp session
+   */
+  public async resetSession(): Promise<void> {
+    console.log('> [WhatsApp] Resetting session via WAHA...');
+    await wahaService.restartSession();
   }
 
-  public async disconnect() {
-    if (this.sock) {
-      try { this.sock.ev.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
-      try { await this.sock.logout(); } catch (e) { console.warn('[WA] logout error:', e); }
-      try { this.sock.end(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
-      this.sock = null;
-      this.status = 'disconnected';
-      this.qrcodeDataUrl = null;
-      this.isInitializing = false;
-      this.logoutRetryCount = 0;
-      if (this.onStatus) this.onStatus(this.status);
-    }
-  }
-
-  public async resetSession() {
-    const sessionPath = process.env.WA_SESSION_PATH || path.join(process.cwd(), '.baileys_auth');
-    if (this.sock) {
-      try { this.sock.ev.removeAllListeners(); } catch(e) { console.warn('[WA] removeAllListeners error:', e); }
-      try { await this.sock.logout(); } catch (e) { console.warn('[WA] logout error:', e); }
-      try { this.sock.end(undefined); } catch(e) { console.warn('[WA] sock.end error:', e); }
-      this.sock = null;
-    }
-    try {
-      if (fs.existsSync(sessionPath)) {
-        fs.rmSync(sessionPath, { recursive: true, force: true });
-      }
-    } catch (e) { console.warn('[WA] Session cleanup error:', e); }
-    this.status = 'disconnected';
-    this.qrcodeDataUrl = null;
-    this.isInitializing = false;
-    this.logoutRetryCount = 0;
-    if (this.onStatus) this.onStatus(this.status);
-    return this.initialize();
-  }
-
+  /**
+   * Returns current connection status and QR data URL
+   */
   public getStatus() {
-    return {
-      status: this.status,
-      qr: this.qrcodeDataUrl
-    };
+    return wahaService.getStatus();
   }
 
-  public isConnected() {
-    return this.status === 'connected' && !!this.sock;
+  /**
+   * Checks if WhatsApp is currently connected
+   */
+  public isConnected(): boolean {
+    return wahaService.isConnected();
   }
 
-
+  /**
+   * Sends a message with optional mentions
+   */
   public async sendMessage(chatId: string, text: string, mentions?: string[]): Promise<void> {
-    if (!this.isConnected()) throw new Error('WhatsApp not connected');
-    return this.enqueueMessage(async () => {
-      await this.sock.sendMessage(chatId, { text, mentions: mentions || [] });
-    });
+    await wahaService.sendMessage(chatId, text, mentions);
   }
 }
 
