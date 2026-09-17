@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { messageService } from '../services/message.service';
 import { requireAuth } from '../middleware/auth';
+import { contactResolver } from '../services/contact-resolver.service';
 
 const router = Router();
 
@@ -22,7 +23,15 @@ router.get('/', requireAuth, async (req, res) => {
 
     const chatsWithLastMessage = chats.map((chat) => {
       const { messages, ...rest } = chat as any;
-      return { ...rest, lastMessage: messages[0] || null };
+      let name = chat.name;
+      if (!chat.isGroup) {
+        const resolved = contactResolver.getDisplayNameSync(chat.id);
+        const rawId = chat.id.split('@')[0];
+        if (resolved && resolved !== rawId && !resolved.includes('@') && !/^\d{10,16}$/.test(resolved)) {
+          name = resolved;
+        }
+      }
+      return { ...rest, name, lastMessage: messages[0] || null };
     });
 
     res.json(chatsWithLastMessage);
@@ -76,14 +85,22 @@ router.get('/:chatId/contacts', requireAuth, async (req, res) => {
       include: { contact: true }
     });
     if (participants.length > 0) {
-      return res.json(participants.map(p => ({
-        id: p.contact.id,
-        lidId: p.contact.lidId,
-        phoneNumber: p.contact.phoneNumber,
-        pushName: p.contact.pushName,
-        displayName: p.contact.displayName,
-        role: p.role
-      })));
+      return res.json(participants.map(p => {
+        const c = p.contact;
+        const mappedJid = c.id.endsWith('@lid') ? contactResolver.resolveToMentionJid(c.id) : null;
+        const realPhone = mappedJid ? mappedJid.split('@')[0] : (!contactResolver.isLid(c.phoneNumber) ? c.phoneNumber : null);
+        const name = c.displayName || c.pushName || contactResolver.getDisplayNameSync(c.id) || (mappedJid ? contactResolver.getDisplayNameSync(mappedJid) : null);
+
+        return {
+          id: c.id,
+          lidId: c.lidId || (c.id.endsWith('@lid') ? c.id : null),
+          phoneNumber: realPhone || c.phoneNumber,
+          pushName: name || c.pushName,
+          displayName: c.displayName || name,
+          mappedJid: mappedJid || null,
+          role: p.role
+        };
+      }));
     }
     
     // Fallback: unique message senders
@@ -97,7 +114,20 @@ router.get('/:chatId/contacts', requireAuth, async (req, res) => {
       where: { id: { in: senders.map(s => s.senderId!).filter(Boolean) } }
     });
 
-    res.json(contacts);
+    res.json(contacts.map(c => {
+      const mappedJid = c.id.endsWith('@lid') ? contactResolver.resolveToMentionJid(c.id) : null;
+      const realPhone = mappedJid ? mappedJid.split('@')[0] : (!contactResolver.isLid(c.phoneNumber) ? c.phoneNumber : null);
+      const name = c.displayName || c.pushName || contactResolver.getDisplayNameSync(c.id) || (mappedJid ? contactResolver.getDisplayNameSync(mappedJid) : null);
+
+      return {
+        id: c.id,
+        lidId: c.lidId || (c.id.endsWith('@lid') ? c.id : null),
+        phoneNumber: realPhone || c.phoneNumber,
+        pushName: name || c.pushName,
+        displayName: c.displayName || name,
+        mappedJid: mappedJid || null
+      };
+    }));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch contacts' });
   }

@@ -62,10 +62,11 @@ export const taskService = {
         message += `📅 Bitiş: ${dueDateStr}\n`;
         if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
         
-        // Include full source message text
+        // Include full source message text with resolved readable names
         const sourceBody = (data as any).sourceMessageBody || task.sourceMessage?.body;
         if (sourceBody) {
-          message += `\n💬 _Kaynak mesaj:_\n_"${sourceBody}"_`;
+          const readableSourceBody = await contactResolver.formatMentionsToNames(sourceBody);
+          message += `\n💬 _Kaynak mesaj:_\n_"${readableSourceBody}"_`;
         }
 
         const baseUrl = process.env.APP_URL!;

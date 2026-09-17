@@ -242,17 +242,20 @@ export class WhatsAppService {
         if (contacts) {
           for (const con of contacts) {
             if (con.id) {
+              const isLid = con.id.endsWith('@lid') || contactResolver.isLid(con.id);
+              const phone = !isLid ? con.id.split('@')[0] : '';
               await prisma.contact.upsert({
                 where: { id: con.id },
                 update: {
                   pushName: con.notify || con.name || undefined,
-                  phoneNumber: con.id.split('@')[0]
+                  ...(phone ? { phoneNumber: phone } : {})
                 },
                 create: {
                   id: con.id,
                   pushName: con.notify || con.name || null,
                   displayName: con.name || con.notify || null,
-                  phoneNumber: con.id.split('@')[0]
+                  phoneNumber: phone,
+                  ...(isLid ? { lidId: con.id } : {})
                 }
               }).catch(() => {});
             }
@@ -427,16 +430,19 @@ export class WhatsAppService {
 
           if ((metadata as any).participants) {
             for (const p of (metadata as any).participants) {
+              const isLidP = p.id?.endsWith('@lid') || contactResolver.isLid(p.id);
+              const pPhone = !isLidP ? p.id?.split('@')[0] : '';
               await prisma.contact.upsert({
                 where: { id: p.id },
                 update: {
-                  phoneNumber: p.id.split('@')[0],
+                  ...(pPhone ? { phoneNumber: pPhone } : {}),
                   ...(p.notify && { pushName: p.notify })
                 },
                 create: {
                   id: p.id,
-                  phoneNumber: p.id.split('@')[0],
+                  phoneNumber: pPhone,
                   pushName: p.notify || null,
+                  ...(isLidP ? { lidId: p.id } : {})
                 }
               }).catch(() => {});
 
@@ -446,8 +452,10 @@ export class WhatsAppService {
                 create: { chatId: jid, contactId: p.id, role: p.admin || 'member' }
               }).catch(() => {});
 
-              if (p.id.endsWith('@lid') && p.jid) {
+              if (p.id?.endsWith('@lid') && p.jid) {
                 await contactResolver.addMapping(p.id, p.jid);
+              } else if (p.lid && p.id?.endsWith('@s.whatsapp.net')) {
+                await contactResolver.addMapping(p.lid, p.id);
               }
             }
           }

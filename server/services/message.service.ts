@@ -9,20 +9,28 @@ export const messageService = {
       body, quotedText, quotedSender, messageType, mediaUrl, mediaName, mediaMime, isFromMe, timestamp
     } = data;
 
-    // Only update chat name if it's provided and not a fallback JID or if current chat name is just a JID
+    // Only update chat name if it's provided and not a fallback JID or if current chat name is numeric/ID
     const existingChat = await prisma.chat.findUnique({ where: { id: chatId } });
-    const shouldUpdateName = chatName && !chatName.includes('@') && (!existingChat || existingChat.name.includes('@'));
+    let resolvedChatName = chatName;
+    if (!isGroup) {
+      const resolved = contactResolver.getDisplayNameSync(chatId) || (senderName && !senderName.includes('@') ? senderName : null);
+      if (resolved && !resolved.includes('@') && !/^\d{10,16}$/.test(resolved)) {
+        resolvedChatName = resolved;
+      }
+    }
+    const isCurrentNameNumeric = existingChat && (/^\d{10,16}$/.test(existingChat.name) || existingChat.name.includes('@'));
+    const shouldUpdateName = resolvedChatName && !resolvedChatName.includes('@') && (!existingChat || isCurrentNameNumeric);
 
     await prisma.chat.upsert({
       where: { id: chatId },
       update: {
-        name: shouldUpdateName ? chatName : existingChat?.name || chatName || chatId,
+        name: shouldUpdateName ? resolvedChatName : existingChat?.name || resolvedChatName || chatId,
         isGroup: !!isGroup,
         updatedAt: timestamp ? new Date(timestamp) : new Date()
       },
       create: {
         id: chatId,
-        name: chatName || chatId,
+        name: resolvedChatName || chatId,
         isGroup: !!isGroup,
         updatedAt: timestamp ? new Date(timestamp) : new Date()
       }
@@ -31,17 +39,21 @@ export const messageService = {
     // Upsert contact (sender) if available
     let validSenderId: string | null = null;
     if (senderId && senderId !== 'me') {
+      const isLid = contactResolver.isLid(senderId);
+      const cleanPhone = senderPhone && !contactResolver.isLid(senderPhone) ? senderPhone : (!isLid ? senderId.split('@')[0] : null);
+
       const contact = await prisma.contact.upsert({
         where: { id: senderId },
         update: {
           pushName: senderName || undefined,
-          phoneNumber: senderPhone || senderId.split('@')[0],
+          ...(cleanPhone ? { phoneNumber: cleanPhone } : {}),
         },
         create: {
           id: senderId,
           pushName: senderName || null,
           displayName: senderName || null,
-          phoneNumber: senderPhone || senderId.split('@')[0],
+          phoneNumber: cleanPhone || '',
+          ...(isLid ? { lidId: senderId } : {})
         }
       });
       validSenderId = contact.id;

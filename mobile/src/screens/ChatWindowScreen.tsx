@@ -150,6 +150,7 @@ export const ChatWindowScreen = () => {
             renderItem={({ item }) => (
               <MessageBubble
                 message={item}
+                contacts={contacts}
                 onCreateTask={handleCreateTaskFromMsg}
               />
             )}

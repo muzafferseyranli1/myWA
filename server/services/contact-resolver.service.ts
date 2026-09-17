@@ -21,6 +21,16 @@ export class ContactResolverService {
     return ContactResolverService.instance;
   }
 
+  public isLid(identifier: string): boolean {
+    if (!identifier) return false;
+    if (identifier.endsWith('@lid')) return true;
+    const clean = identifier.split('@')[0].trim();
+    if (this.lidToJidMap.has(`${clean}@lid`) || this.lidToJidMap.has(clean)) return true;
+    // WhatsApp LIDs are typically 14-16 digits and do not match standard Turkish numbers (10-12 digits)
+    if (/^\d{14,16}$/.test(clean) && !clean.startsWith('90')) return true;
+    return false;
+  }
+
   /**
    * Baileys store'dan LID → JID eşlemelerini yükle
    */
@@ -56,7 +66,9 @@ export class ContactResolverService {
         const name = c.displayName || c.pushName;
         if (name) {
           this.cacheContactName(c.id, name);
-          if (c.phoneNumber) this.cacheContactName(c.phoneNumber, name);
+          if (c.phoneNumber && !this.isLid(c.phoneNumber)) {
+            this.cacheContactName(c.phoneNumber, name);
+          }
           if (c.lidId) this.cacheContactName(c.lidId, name);
           const rawId = c.id.split('@')[0];
           this.cacheContactName(rawId, name);
@@ -65,7 +77,21 @@ export class ContactResolverService {
           this.lidToJidMap.set(c.lidId, c.id);
         }
       }
-      console.log(`> ContactResolver: Loaded ${contacts.length} contacts (${this.nameCache.size} name keys) from DB`);
+
+      // Çift yönlü isim ve numara eşleme: LID ile JID arasındaki isimleri senkronize et
+      for (const [lid, jid] of this.lidToJidMap.entries()) {
+        const nameFromLid = this.getDisplayNameSync(lid);
+        const nameFromJid = this.getDisplayNameSync(jid);
+        const bestName = nameFromLid || nameFromJid;
+        if (bestName) {
+          this.cacheContactName(lid, bestName);
+          this.cacheContactName(jid, bestName);
+          this.cacheContactName(lid.split('@')[0], bestName);
+          this.cacheContactName(jid.split('@')[0], bestName);
+        }
+      }
+
+      console.log(`> ContactResolver: Loaded ${contacts.length} contacts (${this.nameCache.size} name keys, ${this.lidToJidMap.size} mappings) from DB`);
     } catch (e) {
       console.error('ContactResolver loadFromDatabase error:', e);
     }
@@ -81,37 +107,77 @@ export class ContactResolverService {
   /**
    * LID → JID eşlemesi ekle
    */
-  public addMapping(lid: string, jid: string) {
+  public async addMapping(lid: string, jid: string) {
+    if (!lid || !jid || lid === jid) return;
+    // JID'in sahte bir LID olmadığından emin ol
+    if (jid.endsWith('@s.whatsapp.net') && this.isLid(jid.split('@')[0])) {
+      return;
+    }
+
     this.lidToJidMap.set(lid, jid);
-    // Veritabanında da güncelle (kayıt yoksa oluşturarak hatayı önle)
-    prisma.contact.upsert({
-      where: { id: jid },
-      update: { lidId: lid },
-      create: { id: jid, lidId: lid, phoneNumber: jid.split('@')[0] }
-    }).catch(() => {});
+
+    // İsimleri çift yönlü aktar
+    const name = this.getDisplayNameSync(lid) || this.getDisplayNameSync(jid);
+    if (name) {
+      this.cacheContactName(lid, name);
+      this.cacheContactName(jid, name);
+    }
+
+    // Veritabanında güncelle
+    try {
+      await prisma.contact.upsert({
+        where: { id: jid },
+        update: { 
+          lidId: lid,
+          ...(name && { pushName: name, displayName: name })
+        },
+        create: { 
+          id: jid, 
+          lidId: lid, 
+          phoneNumber: jid.split('@')[0],
+          pushName: name || null,
+          displayName: name || null
+        }
+      });
+
+      const phone = jid.split('@')[0];
+      if (phone && !this.isLid(phone)) {
+        await prisma.contact.updateMany({
+          where: { id: lid },
+          data: { phoneNumber: phone }
+        });
+      }
+    } catch (e) {}
   }
 
   /**
-   * Bir contact ID'yi mention için kullanılabilir JID'e çevir
+   * Bir contact ID'yi mention için kullanılabilir gerçek JID'e çevir
    * @returns JID formatında ID (xxx@s.whatsapp.net) veya null
    */
   public resolveToMentionJid(contactId: string): string | null {
     if (!contactId) return null;
 
-    // Zaten @s.whatsapp.net formatındaysa direkt kullan
-    if (contactId.endsWith('@s.whatsapp.net')) {
-      return contactId;
-    }
-
-    // LID ise cache'den JID'e çevir
-    if (contactId.endsWith('@lid')) {
-      const jid = this.lidToJidMap.get(contactId);
-      if (jid && jid.endsWith('@s.whatsapp.net')) return jid;
+    // LID ise cache'den gerçek JID'e çevir
+    if (contactId.endsWith('@lid') || this.isLid(contactId)) {
+      const fullLid = contactId.endsWith('@lid') ? contactId : `${contactId}@lid`;
+      const jid = this.lidToJidMap.get(fullLid) || this.lidToJidMap.get(contactId.split('@')[0]);
+      if (jid && jid.endsWith('@s.whatsapp.net') && !this.isLid(jid.split('@')[0])) {
+        return jid;
+      }
       return null;
     }
 
-    // Sadece numara ise @s.whatsapp.net ekle
-    if (/^\d+$/.test(contactId)) {
+    // Zaten @s.whatsapp.net formatındaysa (ve sahte LID jid değilse) direkt kullan
+    if (contactId.endsWith('@s.whatsapp.net')) {
+      const raw = contactId.split('@')[0];
+      if (!this.isLid(raw)) {
+        return contactId;
+      }
+      return null;
+    }
+
+    // Sadece numara ise ve LID değilse @s.whatsapp.net ekle
+    if (/^\d{10,13}$/.test(contactId) && !this.isLid(contactId)) {
       return `${contactId}@s.whatsapp.net`;
     }
 
@@ -127,6 +193,15 @@ export class ContactResolverService {
     if (this.nameCache.has(clean)) return this.nameCache.get(clean)!;
     const raw = clean.split('@')[0];
     if (this.nameCache.has(raw)) return this.nameCache.get(raw)!;
+
+    // Eşleşen LID veya JID varsa oradan da bak
+    const mapped = this.lidToJidMap.get(clean) || this.lidToJidMap.get(`${raw}@lid`);
+    if (mapped) {
+      if (this.nameCache.has(mapped)) return this.nameCache.get(mapped)!;
+      const rawMapped = mapped.split('@')[0];
+      if (this.nameCache.has(rawMapped)) return this.nameCache.get(rawMapped)!;
+    }
+
     return null;
   }
 
@@ -151,16 +226,31 @@ export class ContactResolverService {
             { lidId: `${raw}@lid` }
           ]
         },
-        select: { pushName: true, displayName: true, phoneNumber: true, id: true }
+        select: { pushName: true, displayName: true, phoneNumber: true, id: true, lidId: true }
       });
+
       if (contact) {
-        const name = contact.displayName || contact.pushName || contact.phoneNumber || raw;
-        this.cacheContactName(contactId, name);
-        this.cacheContactName(raw, name);
-        this.cacheContactName(contact.id, name);
-        return name;
+        let name: string | null = contact.displayName || contact.pushName || null;
+        // Eğer bu kayıtta isim yoksa ama bağlı lidId / JID varsa ona bak
+        if (!name && contact.lidId) {
+          const linked = await prisma.contact.findUnique({
+            where: { id: contact.lidId },
+            select: { pushName: true, displayName: true }
+          });
+          name = linked?.displayName || linked?.pushName || null;
+        }
+
+        if (name) {
+          this.cacheContactName(contactId, name);
+          this.cacheContactName(raw, name);
+          this.cacheContactName(contact.id, name);
+          if (contact.lidId) this.cacheContactName(contact.lidId, name);
+          return name;
+        }
       }
     } catch (e) {}
+
+    // İsim bulunamadıysa: Eğer LID ise ham numara yerine 'Bilinmeyen' yerine raw dönebilir
     return contactId.split('@')[0];
   }
 
@@ -175,8 +265,8 @@ export class ContactResolverService {
 
   /**
    * Bir contact için etiketleme tag'i (@xxx) ve JID bilgisini çözümler.
-   * WhatsApp'ta doğru bildirim ve mavi etiket için @telefon_numarasi döndürür.
-   * Numara bulunamazsa @isim döner.
+   * - Gerçek telefon numarası biliniyorsa WhatsApp bildirimi için @telefon_numarasi ve jid döndürür.
+   * - Sadece LID biliniyorsa ve telefon yoksa ASLA sahte numara üretmez, @İsim ve jid: null döndürür.
    */
   public resolveAssigneeMention(contact: {
     id: string;
@@ -185,25 +275,48 @@ export class ContactResolverService {
     pushName?: string | null;
   }): { tag: string; jid: string | null } {
     let jid = this.resolveToMentionJid(contact.id);
+
+    // Telefon numarası varsa ve LID değilse JID üret
     if (!jid && contact.phoneNumber) {
       const cleanPhone = contact.phoneNumber.replace(/\D/g, '');
-      if (cleanPhone.length >= 10) {
+      const isLidNum = this.isLid(contact.id) || this.isLid(cleanPhone) || cleanPhone === contact.id.split('@')[0];
+      if (!isLidNum && cleanPhone.length >= 10 && cleanPhone.length <= 13) {
         jid = `${cleanPhone}@s.whatsapp.net`;
         if (contact.id.endsWith('@lid')) {
           this.addMapping(contact.id, jid);
         }
       }
     }
-    if (!jid && contact.id.endsWith('@s.whatsapp.net')) {
-      jid = contact.id;
-    }
 
     if (jid) {
       return { tag: `@${jid.split('@')[0]}`, jid };
     }
 
-    const name = contact.displayName || contact.pushName || contact.phoneNumber;
-    return { tag: name ? `@${name.trim()}` : '@Bilinmeyen', jid: null };
+    // Telefon/JID bulunamayan LID kullanıcıları için doğrudan temiz @İsim kullan
+    const name = contact.displayName || contact.pushName || this.getDisplayNameSync(contact.id);
+    return { tag: name ? `@${name.trim()}` : '@Görevli', jid: null };
+  }
+
+  /**
+   * Metin içerisindeki ham LID veya telefon mention'larını (@123456789) okunabilir isimlere (@İsim) çevirir.
+   */
+  public async formatMentionsToNames(text: string): Promise<string> {
+    if (!text) return text;
+    const mentionRegex = /@(\d{9,16})/g;
+    if (!mentionRegex.test(text)) return text;
+
+    mentionRegex.lastIndex = 0;
+    let result = text;
+    const matches = Array.from(text.matchAll(mentionRegex));
+
+    for (const match of matches) {
+      const rawNumber = match[1];
+      const name = await this.resolveDisplayName(rawNumber);
+      if (name && name !== rawNumber && !name.includes('@')) {
+        result = result.replaceAll(`@${rawNumber}`, `@${name.trim()}`);
+      }
+    }
+    return result;
   }
 }
 

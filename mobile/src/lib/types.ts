@@ -21,10 +21,12 @@ export interface ChatItem {
 
 export interface ContactItem {
   id: string;
-  phoneNumber: string;
-  pushName: string | null;
-  displayName: string | null;
-  avatarUrl: string | null;
+  lidId?: string | null;
+  phoneNumber?: string;
+  pushName?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  mappedJid?: string | null;
   role?: string;
 }
 

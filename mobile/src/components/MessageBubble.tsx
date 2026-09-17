@@ -1,28 +1,101 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { CheckSquare, CornerDownRight } from 'lucide-react-native';
-import { MessageItem } from '../lib/types';
+import { ContactItem, MessageItem } from '../lib/types';
 import { COLORS } from '../lib/constants';
 
 interface MessageBubbleProps {
   message: MessageItem;
+  contacts?: ContactItem[];
   onCreateTask?: (message: MessageItem) => void;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCreateTask }) => {
+function resolveNameFromContacts(identifier: string, contacts: ContactItem[] = []): string | null {
+  if (!identifier) return null;
+  const clean = identifier.trim().replace(/^@/, '');
+  const rawId = clean.split('@')[0];
+
+  const found = contacts.find((c) => {
+    const cId = c.id ? c.id.split('@')[0] : '';
+    const cPhone = c.phoneNumber ? c.phoneNumber.split('@')[0] : '';
+    const cLid = c.lidId ? c.lidId.split('@')[0] : '';
+    const cMapped = c.mappedJid ? c.mappedJid.split('@')[0] : '';
+    return cId === rawId || cPhone === rawId || cLid === rawId || cMapped === rawId || c.id === clean || c.phoneNumber === clean;
+  });
+
+  if (found) {
+    const name = found.displayName || found.pushName;
+    if (name) return name;
+    if (found.phoneNumber && found.phoneNumber !== rawId && found.phoneNumber.length <= 13) {
+      return found.phoneNumber;
+    }
+  }
+  return null;
+}
+
+function renderFormattedBody(text: string, contacts: ContactItem[] = []) {
+  if (!text) return null;
+  const mentionRegex = /@(\d{9,16})/g;
+  if (!mentionRegex.test(text)) {
+    return <Text style={styles.messageText}>{text}</Text>;
+  }
+
+  mentionRegex.lastIndex = 0;
+  const elements: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = mentionRegex.exec(text)) !== null) {
+    const rawNumber = match[1];
+    const resolvedName = resolveNameFromContacts(rawNumber, contacts);
+
+    if (match.index > lastIndex) {
+      elements.push(text.substring(lastIndex, match.index));
+    }
+
+    if (resolvedName) {
+      elements.push(
+        <Text key={match.index} style={styles.mentionText}>
+          @{resolvedName}
+        </Text>
+      );
+    } else {
+      elements.push(
+        <Text key={match.index} style={styles.mentionText}>
+          @{rawNumber}
+        </Text>
+      );
+    }
+
+    lastIndex = mentionRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    elements.push(text.substring(lastIndex));
+  }
+
+  return <Text style={styles.messageText}>{elements}</Text>;
+}
+
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, contacts = [], onCreateTask }) => {
   const isFromMe = message.isFromMe;
   const time = new Date(message.timestamp).toLocaleTimeString('tr-TR', {
     hour: '2-digit',
     minute: '2-digit',
   });
 
+  const senderDisplay =
+    message.sender?.displayName ||
+    message.sender?.pushName ||
+    (message.senderId ? resolveNameFromContacts(message.senderId, contacts) : null) ||
+    message.senderId?.split('@')[0] ||
+    'Kullanıcı';
+
   return (
     <View style={[styles.wrapper, isFromMe ? styles.wrapperRight : styles.wrapperLeft]}>
       <View style={[styles.bubble, isFromMe ? styles.bubbleMe : styles.bubbleOther]}>
         {!isFromMe && (
-          <Text style={styles.senderName}>
-            {message.sender?.displayName || message.sender?.pushName || message.senderId?.split('@')[0] || 'Kullanıcı'}
-          </Text>
+          <Text style={styles.senderName}>{senderDisplay}</Text>
         )}
 
         {/* Quoted Message Preview */}
@@ -32,7 +105,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCreateT
             <View style={styles.quotedContent}>
               {message.quotedSender && (
                 <Text style={styles.quotedSender} numberOfLines={1}>
-                  {message.quotedSender}
+                  {resolveNameFromContacts(message.quotedSender, contacts) || message.quotedSender}
                 </Text>
               )}
               <Text style={styles.quotedText} numberOfLines={2}>
@@ -43,9 +116,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCreateT
         )}
 
         {/* Body */}
-        {message.body ? (
-          <Text style={styles.messageText}>{message.body}</Text>
-        ) : null}
+        {message.body ? renderFormattedBody(message.body, contacts) : null}
 
         {/* Media indicator if url exists */}
         {message.mediaUrl && (
@@ -147,6 +218,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textPrimary,
     lineHeight: 20,
+  },
+  mentionText: {
+    color: COLORS.accentBlue,
+    fontWeight: '700',
   },
   mediaContainer: {
     marginTop: 4,

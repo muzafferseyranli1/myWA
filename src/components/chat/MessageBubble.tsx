@@ -13,11 +13,27 @@ function resolveNameFromContacts(identifier: string, contacts: any[] = []): stri
     const cId = c.id ? c.id.split('@')[0] : '';
     const cPhone = c.phoneNumber ? c.phoneNumber.split('@')[0] : '';
     const cLid = c.lidId ? c.lidId.split('@')[0] : '';
-    return cId === rawId || cPhone === rawId || cLid === rawId || c.id === clean || c.phoneNumber === clean;
+    const cMapped = c.mappedJid ? c.mappedJid.split('@')[0] : '';
+    return cId === rawId || cPhone === rawId || cLid === rawId || cMapped === rawId || c.id === clean || c.phoneNumber === clean;
   });
 
   if (found) {
-    return found.displayName || found.pushName || (found.phoneNumber && found.phoneNumber !== rawId ? found.phoneNumber : null);
+    const name = found.displayName || found.pushName;
+    if (name) return name;
+
+    // Bağlı başka bir kayıt varsa (örn: LID veya JID) oradaki ismi kontrol et
+    const linked = contacts.find(c => 
+      (c !== found) && 
+      ((found.lidId && (c.id === found.lidId || c.lidId === found.lidId)) ||
+       (found.id && c.lidId === found.id))
+    );
+    if (linked && (linked.displayName || linked.pushName)) {
+      return linked.displayName || linked.pushName;
+    }
+
+    if (found.phoneNumber && found.phoneNumber !== rawId && found.phoneNumber.length <= 13) {
+      return found.phoneNumber;
+    }
   }
   return null;
 }
