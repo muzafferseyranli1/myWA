@@ -63,8 +63,13 @@ export class ContactResolverService {
         select: { id: true, lidId: true, phoneNumber: true, pushName: true, displayName: true }
       });
       for (const c of contacts) {
-        const name = c.displayName || c.pushName;
-        if (name) {
+        const isSelf = c.id.includes('905332760534') || c.id === '31933115404296@lid' || c.phoneNumber === '905332760534';
+        let name = c.displayName || c.pushName;
+        if (!isSelf && name === 'Muzaffer') {
+          name = (c.pushName !== 'Muzaffer' ? c.pushName : null) || null;
+        }
+
+        if (name && (isSelf || name !== 'Muzaffer')) {
           this.cacheContactName(c.id, name);
           if (c.phoneNumber && !this.isLid(c.phoneNumber)) {
             this.cacheContactName(c.phoneNumber, name);
@@ -76,13 +81,20 @@ export class ContactResolverService {
         if (c.lidId) {
           this.lidToJidMap.set(c.lidId, c.id);
         }
+        if (c.phoneNumber && !this.isLid(c.phoneNumber) && c.id.endsWith('@lid')) {
+          this.lidToJidMap.set(c.id, `${c.phoneNumber}@s.whatsapp.net`);
+        }
       }
 
       // Çift yönlü isim ve numara eşleme: LID ile JID arasındaki isimleri senkronize et
       for (const [lid, jid] of this.lidToJidMap.entries()) {
+        const isSelf = lid === '31933115404296@lid' || jid.includes('905332760534');
         const nameFromLid = this.getDisplayNameSync(lid);
         const nameFromJid = this.getDisplayNameSync(jid);
-        const bestName = nameFromLid || nameFromJid;
+        let bestName = nameFromLid || nameFromJid;
+        if (!isSelf && bestName === 'Muzaffer') {
+          bestName = null;
+        }
         if (bestName) {
           this.cacheContactName(lid, bestName);
           this.cacheContactName(jid, bestName);

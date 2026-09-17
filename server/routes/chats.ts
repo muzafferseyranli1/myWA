@@ -25,10 +25,19 @@ router.get('/', requireAuth, async (req, res) => {
       const { messages, ...rest } = chat as any;
       let name = chat.name;
       if (!chat.isGroup) {
+        const isSelf = chat.id.includes('905332760534') || chat.id === '31933115404296@lid';
         const resolved = contactResolver.getDisplayNameSync(chat.id);
         const rawId = chat.id.split('@')[0];
         if (resolved && resolved !== rawId && !resolved.includes('@') && !/^\d{10,16}$/.test(resolved)) {
-          name = resolved;
+          if (isSelf || resolved !== 'Muzaffer') {
+            name = resolved;
+          }
+        }
+        if (!isSelf && name === 'Muzaffer') {
+          name = (resolved && resolved !== 'Muzaffer' && !/^\d{10,16}$/.test(resolved)) ? resolved : rawId;
+        }
+        if (/^90\d{10}$/.test(name)) {
+          name = `+90 ${name.substring(2, 5)} ${name.substring(5, 8)} ${name.substring(8, 10)} ${name.substring(10, 12)}`;
         }
       }
       return { ...rest, name, lastMessage: messages[0] || null };

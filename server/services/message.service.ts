@@ -11,34 +11,48 @@ export const messageService = {
 
     // Only update chat name if it's provided and not a fallback JID or if current chat name is numeric/ID
     const existingChat = await prisma.chat.findUnique({ where: { id: chatId } });
+    const isSelfChat = chatId.includes('905332760534') || chatId === '31933115404296@lid';
     let resolvedChatName = chatName;
     if (!isGroup) {
-      const resolved = contactResolver.getDisplayNameSync(chatId) || (senderName && !senderName.includes('@') ? senderName : null);
-      if (resolved && !resolved.includes('@') && !/^\d{10,16}$/.test(resolved)) {
-        resolvedChatName = resolved;
+      // In 1-on-1 chats:
+      // If isFromMe: NEVER use senderName as chat name! The other party's name comes from contactResolver
+      const contactName = contactResolver.getDisplayNameSync(chatId);
+      if (contactName && !contactName.includes('@') && !/^\d{10,16}$/.test(contactName)) {
+        if (isSelfChat || contactName !== 'Muzaffer') {
+          resolvedChatName = contactName;
+        }
+      } else if (!isFromMe && senderName && !senderName.includes('@') && !/^\d{10,16}$/.test(senderName)) {
+        if (isSelfChat || senderName !== 'Muzaffer') {
+          resolvedChatName = senderName;
+        }
       }
     }
     const isCurrentNameNumeric = existingChat && (/^\d{10,16}$/.test(existingChat.name) || existingChat.name.includes('@'));
-    const shouldUpdateName = resolvedChatName && !resolvedChatName.includes('@') && (!existingChat || isCurrentNameNumeric);
+    const isCurrentNameCorrupted = existingChat && existingChat.name === 'Muzaffer' && !isSelfChat;
+    const shouldUpdateName = resolvedChatName && 
+      !resolvedChatName.includes('@') && 
+      !/^\d{10,16}$/.test(resolvedChatName) && 
+      (isSelfChat || resolvedChatName !== 'Muzaffer') &&
+      (!existingChat || isCurrentNameNumeric || isCurrentNameCorrupted);
 
     await prisma.chat.upsert({
       where: { id: chatId },
       update: {
-        name: shouldUpdateName ? resolvedChatName : existingChat?.name || resolvedChatName || chatId,
+        ...(shouldUpdateName ? { name: resolvedChatName } : {}),
         isGroup: !!isGroup,
         updatedAt: timestamp ? new Date(timestamp) : new Date()
       },
       create: {
         id: chatId,
-        name: resolvedChatName || chatId,
+        name: shouldUpdateName ? resolvedChatName : (existingChat?.name || (chatId.includes('@') ? chatId.split('@')[0] : chatId)),
         isGroup: !!isGroup,
         updatedAt: timestamp ? new Date(timestamp) : new Date()
       }
     });
 
-    // Upsert contact (sender) if available
+    // Upsert contact (sender) only if it's NOT an outgoing message from me
     let validSenderId: string | null = null;
-    if (senderId && senderId !== 'me') {
+    if (senderId && senderId !== 'me' && !isFromMe) {
       const isLid = contactResolver.isLid(senderId);
       const cleanPhone = senderPhone && !contactResolver.isLid(senderPhone) ? senderPhone : (!isLid ? senderId.split('@')[0] : null);
 

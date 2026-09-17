@@ -238,16 +238,18 @@ export class WhatsAppService {
 
       // Sync chat and message history
       this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }: any) => {
-        console.log(`> Syncing history: ${chats?.length || 0} chats, ${messages?.length || 0} messages`);
+        console.log(`> Syncing history: ${chats?.length || 0} chats, ${contacts?.length || 0} contacts, ${messages?.length || 0} messages`);
         if (contacts) {
           for (const con of contacts) {
             if (con.id) {
               const isLid = con.id.endsWith('@lid') || contactResolver.isLid(con.id);
               const phone = !isLid ? con.id.split('@')[0] : '';
+              const name = con.name || con.notify || con.verifiedName;
               await prisma.contact.upsert({
                 where: { id: con.id },
                 update: {
-                  pushName: con.notify || con.name || undefined,
+                  ...(con.name ? { displayName: con.name } : {}),
+                  ...(con.notify ? { pushName: con.notify } : {}),
                   ...(phone ? { phoneNumber: phone } : {})
                 },
                 create: {
@@ -258,24 +260,36 @@ export class WhatsAppService {
                   ...(isLid ? { lidId: con.id } : {})
                 }
               }).catch(() => {});
+
+              if (name) {
+                contactResolver.cacheContactName(con.id, name);
+                if (phone) contactResolver.cacheContactName(phone, name);
+              }
+              if (con.lid && con.id.endsWith('@s.whatsapp.net')) {
+                await contactResolver.addMapping(con.lid, con.id);
+              } else if (con.jid && con.id.endsWith('@lid')) {
+                await contactResolver.addMapping(con.id, con.jid);
+              }
             }
           }
         }
         if (chats) {
           for (const c of chats) {
             if (c.id) {
-              const name = c.name || (c.id.includes('@') ? c.id.split('@')[0] : c.id);
+              const isGroup = c.id.endsWith('@g.us');
+              const resolved = !isGroup ? contactResolver.getDisplayNameSync(c.id) : null;
+              const name = c.name || resolved || (c.id.includes('@') ? c.id.split('@')[0] : c.id);
               await prisma.chat.upsert({
                 where: { id: c.id },
                 update: {
-                  name,
-                  isGroup: c.id.endsWith('@g.us'),
+                  ...(c.name || resolved ? { name: c.name || resolved } : {}),
+                  isGroup,
                   updatedAt: new Date()
                 },
                 create: {
                   id: c.id,
                   name,
-                  isGroup: c.id.endsWith('@g.us'),
+                  isGroup,
                   updatedAt: new Date()
                 }
               }).catch(() => {});
@@ -288,19 +302,29 @@ export class WhatsAppService {
             const text = extractMessageBody(msg);
             const { quotedText, quotedSender } = extractQuotedInfo(msg);
             const mType = extractMessageType(msg);
+            const isGroup = msg.key.remoteJid?.endsWith('@g.us');
+            const isFromMe = !!msg.key.fromMe;
+            const senderId = isGroup 
+              ? (msg.key.participant || msg.key.remoteJid) 
+              : (isFromMe ? 'me' : msg.key.remoteJid);
+            const senderPhone = senderId && senderId !== 'me' ? senderId.split('@')[0] : undefined;
+            const chatName = isGroup 
+              ? undefined 
+              : (!isFromMe ? (msg.pushName || undefined) : undefined);
+
             const parsed = {
               id: msg.key.id,
               chatId: msg.key.remoteJid,
-              chatName: msg.key.remoteJid.endsWith('@g.us') ? undefined : (msg.pushName || msg.key.remoteJid),
-              isGroup: msg.key.remoteJid?.endsWith('@g.us'),
-              senderId: msg.key.participant || msg.key.remoteJid,
-              senderPhone: (msg.key.participant || msg.key.remoteJid)?.split('@')[0],
-              senderName: msg.pushName,
+              chatName,
+              isGroup,
+              senderId,
+              senderPhone,
+              senderName: isFromMe ? undefined : msg.pushName,
               body: text,
               quotedText,
               quotedSender,
               messageType: mType,
-              isFromMe: !!msg.key.fromMe,
+              isFromMe,
               timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
             };
             await messageService.saveMessage(parsed).catch(() => {});
@@ -312,22 +336,108 @@ export class WhatsAppService {
       this.sock.ev.on('chats.upsert', async (newChats: any[]) => {
         for (const c of newChats) {
           if (c.id) {
-            const name = c.name || (c.id.includes('@') ? c.id.split('@')[0] : c.id);
+            const isGroup = c.id.endsWith('@g.us');
+            const resolved = !isGroup ? contactResolver.getDisplayNameSync(c.id) : null;
+            const existingChat = await prisma.chat.findUnique({ where: { id: c.id } });
+            const validName = c.name || resolved;
+
             await prisma.chat.upsert({
               where: { id: c.id },
               update: {
-                name,
-                isGroup: c.id.endsWith('@g.us'),
+                ...(validName ? { name: validName } : {}),
+                isGroup,
                 updatedAt: new Date()
               },
               create: {
                 id: c.id,
-                name,
-                isGroup: c.id.endsWith('@g.us'),
+                name: validName || (existingChat?.name) || (c.id.includes('@') ? c.id.split('@')[0] : c.id),
+                isGroup,
                 updatedAt: new Date()
               }
             }).catch(() => {});
           }
+        }
+      });
+
+      this.sock.ev.on('contacts.upsert', async (contacts: any[]) => {
+        for (const con of contacts) {
+          if (!con.id) continue;
+          const isLid = con.id.endsWith('@lid') || contactResolver.isLid(con.id);
+          const phone = !isLid ? con.id.split('@')[0] : '';
+          const name = con.name || con.notify || con.verifiedName;
+
+          await prisma.contact.upsert({
+            where: { id: con.id },
+            update: {
+              ...(con.name ? { displayName: con.name } : {}),
+              ...(con.notify ? { pushName: con.notify } : {}),
+              ...(phone ? { phoneNumber: phone } : {})
+            },
+            create: {
+              id: con.id,
+              displayName: con.name || null,
+              pushName: con.notify || con.name || null,
+              phoneNumber: phone,
+              ...(isLid ? { lidId: con.id } : {})
+            }
+          }).catch(() => {});
+
+          if (name) {
+            contactResolver.cacheContactName(con.id, name);
+            if (phone) contactResolver.cacheContactName(phone, name);
+
+            // If the chat has a numeric or empty name, update it with real contact name
+            await prisma.chat.updateMany({
+              where: {
+                id: con.id,
+                OR: [
+                  { name: { contains: '@' } },
+                  { name: con.id.split('@')[0] }
+                ]
+              },
+              data: { name }
+            }).catch(() => {});
+          }
+
+          if (con.lid && con.id.endsWith('@s.whatsapp.net')) {
+            await contactResolver.addMapping(con.lid, con.id);
+          } else if (con.jid && con.id.endsWith('@lid')) {
+            await contactResolver.addMapping(con.id, con.jid);
+          }
+        }
+      });
+
+      this.sock.ev.on('contacts.update', async (updates: any[]) => {
+        for (const update of updates) {
+          if (!update.id) continue;
+          const name = update.name || update.notify;
+          await prisma.contact.update({
+            where: { id: update.id },
+            data: {
+              ...(update.name ? { displayName: update.name } : {}),
+              ...(update.notify ? { pushName: update.notify } : {})
+            }
+          }).catch(() => {});
+
+          if (name) {
+            contactResolver.cacheContactName(update.id, name);
+            await prisma.chat.updateMany({
+              where: {
+                id: update.id,
+                OR: [
+                  { name: { contains: '@' } },
+                  { name: update.id.split('@')[0] }
+                ]
+              },
+              data: { name }
+            }).catch(() => {});
+          }
+        }
+      });
+
+      this.sock.ev.on('chats.phoneNumberShare', async ({ lid, jid }: any) => {
+        if (lid && jid) {
+          await contactResolver.addMapping(lid, jid);
         }
       });
 
@@ -366,18 +476,27 @@ export class WhatsAppService {
             const mType = extractMessageType(msg);
 
             const isGroup = msg.key.remoteJid?.endsWith('@g.us');
-            const senderId = msg.key.participant || msg.key.remoteJid;
-            const senderPhone = senderId?.split('@')[0];
+            const isFromMe = !!msg.key.fromMe;
+            const senderId = isGroup 
+              ? (msg.key.participant || msg.key.remoteJid) 
+              : (isFromMe ? 'me' : msg.key.remoteJid);
+            const senderPhone = senderId && senderId !== 'me' ? senderId.split('@')[0] : undefined;
 
-            // If it's a group, don't overwrite group name with sender pushName
+            // In 1-on-1 chats:
+            // If fromMe: msg.pushName is the LOGGED IN USER, NEVER the chat name!
+            // If !fromMe: msg.pushName is the other person's push name!
+            const chatName = isGroup 
+              ? undefined 
+              : (!isFromMe ? (msg.pushName || undefined) : undefined);
+
             const parsedMsg = {
               id: msg.key.id,
               chatId: msg.key.remoteJid,
-              chatName: isGroup ? undefined : (msg.pushName || msg.key.remoteJid),
+              chatName,
               isGroup,
               senderId,
               senderPhone,
-              senderName: msg.pushName,
+              senderName: isFromMe ? undefined : msg.pushName,
               body: text,
               quotedText,
               quotedSender,
@@ -385,7 +504,7 @@ export class WhatsAppService {
               mediaUrl,
               mediaName,
               mediaMime,
-              isFromMe: !!msg.key.fromMe,
+              isFromMe,
               timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000)
             };
             

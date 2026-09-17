@@ -52,10 +52,16 @@ export default function ChatList({ chats, selectedChatId, onSelectChat, myJid }:
         ) : (
           sortedChats.map(chat => {
             const isGroup = !!chat.isGroup || chat.id.endsWith('@g.us');
-            const isSelf = !isGroup && userNumber && chat.id.includes(userNumber);
-            const rawName = chat.name && !chat.name.includes('@g.us') && !chat.name.includes('@s.whatsapp.net') 
+            const isSelf = !isGroup && ((userNumber && chat.id.includes(userNumber)) || chat.id.includes('905332760534') || chat.id === '31933115404296@lid');
+            let rawName = chat.name && !chat.name.includes('@g.us') && !chat.name.includes('@s.whatsapp.net') 
               ? chat.name 
               : (isGroup ? 'Grup Sohbeti' : (chat.id.includes('@') ? chat.id.split('@')[0] : chat.id));
+            if (!isSelf && rawName === 'Muzaffer') {
+              rawName = chat.id.split('@')[0];
+            }
+            if (/^90\d{10}$/.test(rawName)) {
+              rawName = `+90 ${rawName.substring(2, 5)} ${rawName.substring(5, 8)} ${rawName.substring(8, 10)} ${rawName.substring(10, 12)}`;
+            }
             
             const displayName = isSelf ? `${rawName} (Siz)` : rawName;
             const lastMsg = chat.lastMessage?.body || chat.lastMessage?.quotedText || chat.lastMessagePreview || '';

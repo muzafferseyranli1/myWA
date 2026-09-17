@@ -46,10 +46,16 @@ export default function ChatWindow({ chatId, chatName, messages, contacts = [], 
 
   const isGroup = chatId.endsWith('@g.us');
   const userNumber = myJid ? myJid.split('@')[0] : '';
-  const isSelf = !isGroup && userNumber && chatId.includes(userNumber);
-  const rawName = chatName && !chatName.includes('@g.us') && !chatName.includes('@s.whatsapp.net') 
+  const isSelf = !isGroup && ((userNumber && chatId.includes(userNumber)) || chatId.includes('905332760534') || chatId === '31933115404296@lid');
+  let rawName = chatName && !chatName.includes('@g.us') && !chatName.includes('@s.whatsapp.net') 
     ? chatName 
     : (isGroup ? 'Grup Sohbeti' : (chatId.includes('@') ? chatId.split('@')[0] : chatId));
+  if (!isSelf && rawName === 'Muzaffer') {
+    rawName = chatId.split('@')[0];
+  }
+  if (/^90\d{10}$/.test(rawName)) {
+    rawName = `+90 ${rawName.substring(2, 5)} ${rawName.substring(5, 8)} ${rawName.substring(8, 10)} ${rawName.substring(10, 12)}`;
+  }
   const displayName = isSelf ? `${rawName} (Siz)` : rawName;
 
   return (
