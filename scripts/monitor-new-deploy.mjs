@@ -1,6 +1,6 @@
 const COOLIFY_HOST = 'http://188.132.198.144:8000';
 const COOLIFY_TOKEN = '1|h9uFOZlfwk5w7EUrve5X8TfdJQ3IXzevaX1xtuRK2217d5ec';
-const DEPLOY_UUID = 'cgapv7jhviggye9bjlh3cxgs';
+const DEPLOY_UUID = '5lhhewmy5y26jsfxgsbsorpb';
 
 async function monitor() {
   const start = Date.now();
