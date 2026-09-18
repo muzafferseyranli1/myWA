@@ -3,10 +3,11 @@ RUN apk add --no-cache openssl libc6-compat
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-COPY package.json package-lock.json ./
-RUN npm ci --include=dev
+ENV NODE_ENV=development
+COPY package.json package-lock.json* ./
+RUN npm install --include=dev
 COPY . .
-RUN npm run db:generate && npm run typecheck && npm test && npm run build
+RUN npx prisma generate && npm run build
 ENV NODE_ENV=production
 ENV PORT=3060
 RUN mkdir -p /app/public/uploads

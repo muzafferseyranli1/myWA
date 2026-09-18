@@ -9,4 +9,6 @@ temp
 public/uploads
 *.log
 *.tsbuildinfo
+tests
+backups
 dist
