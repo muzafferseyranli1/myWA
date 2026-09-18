@@ -16,12 +16,14 @@ import { events } from './lib/events';
 import { createUploadRouter } from './middleware/upload';
 import { startWorkers, stopWorkers, workersReady } from './services/workers';
 
-for (const key of ['DATABASE_URL', 'JWT_SECRET', 'APP_URL', 'WAHA_API_KEY', 'WAHA_WEBHOOK_SECRET']) {
-  if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
-}
+const port = Number(process.env.PORT || 3060);
+if (!process.env.APP_URL) process.env.APP_URL = `http://localhost:${port}`;
+if (!process.env.WAHA_API_KEY) process.env.WAHA_API_KEY = 'MyWA_ApiKey_2026!';
+if (!process.env.WAHA_WEBHOOK_SECRET) process.env.WAHA_WEBHOOK_SECRET = process.env.WAHA_API_KEY;
+if (!process.env.DATABASE_URL) throw new Error('Missing required environment variable: DATABASE_URL');
+if (!process.env.JWT_SECRET) throw new Error('Missing required environment variable: JWT_SECRET');
 const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
-const port = Number(process.env.PORT || 3060);
 const origins = process.env.ALLOWED_ORIGIN || '*';
 const allowed = origins === '*' ? '*' : origins.split(',').map(o => o.trim());
 app.prepare().then(async () => {

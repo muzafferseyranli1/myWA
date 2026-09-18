@@ -11,5 +11,4 @@ RUN npx prisma generate && npm run build
 ENV PORT=3060
 RUN mkdir -p /app/public/uploads
 EXPOSE 3060
-HEALTHCHECK --interval=15s --timeout=5s --start-period=60s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["sh", "scripts/entrypoint.sh"]

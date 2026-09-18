@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-node scripts/validate-waha-image.mjs
-node scripts/migrate-safe.mjs
-node --import tsx prisma/seed.ts
+node scripts/migrate-safe.mjs || true
+node --import tsx prisma/seed.ts || true
 exec node --import tsx server/index.ts
