@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Trash2, Search, Link as LinkIcon, Check } from 'lucide-react';
+import { X, Trash2, Search, ExternalLink, Copy, Check, AlertCircle } from 'lucide-react';
 
 interface EditTaskModalProps {
   isOpen: boolean;
@@ -9,6 +9,29 @@ interface EditTaskModalProps {
   task: any;
   contacts: Array<{ id: string; phoneNumber: string; pushName?: string; displayName?: string }>;
   onTaskUpdated?: () => void;
+}
+
+async function safeCopy(text: string): Promise<boolean> {
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskUpdated }: EditTaskModalProps) {
@@ -21,6 +44,7 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
     task?.assignees?.map((a: any) => a.contactId || a.contact?.id || a.id) || []
   );
   const [completionNote, setCompletionNote] = useState(task?.completionNote || '');
+  const [reactivateReason, setReactivateReason] = useState('');
   const [searchContact, setSearchContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [showDoneMsg, setShowDoneMsg] = useState(false);
@@ -28,15 +52,25 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
 
   if (!isOpen || !task) return null;
 
-  const copyTaskLink = () => {
+  const isReactivating = task.status === 'DONE' && (status === 'TODO' || status === 'IN_PROGRESS');
+
+  const handleCopyLink = async () => {
     const url = `${window.location.origin}/t/${task.id}`;
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    const success = await safeCopy(url);
+    if (success) {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } else {
+      prompt('Aşağıdaki bağlantıyı kopyalayabilirsiniz:', url);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isReactivating && !reactivateReason.trim()) {
+      alert('Lütfen görevi yeniden aktifleştirme nedenini belirtiniz.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
@@ -50,17 +84,22 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
           description,
           status,
           priority,
-          dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+          dueDate: dueDate ? new Date(dueDate).toISOString() : null,
           assigneeIds,
-          completionNote: status === 'DONE' ? completionNote : undefined
+          completionNote: status === 'DONE' ? (completionNote.trim() || undefined) : undefined,
+          reactivateReason: isReactivating ? reactivateReason.trim() : undefined
         })
       });
       if (res.ok) {
         if (onTaskUpdated) onTaskUpdated();
         onClose();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Görev güncellenemedi');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update task:', err);
+      alert(err.message || 'Bağlantı hatası oluştu');
     } finally {
       setLoading(false);
     }
@@ -118,10 +157,11 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
         
         <div className="overflow-y-auto flex-1 p-4">
           {showDoneMsg && (
-            <div className="mb-4 bg-green-500/20 text-green-400 p-2 rounded text-sm text-center">
+            <div className="mb-4 bg-green-500/20 text-green-600 p-2 rounded text-sm text-center font-medium">
               Görev tamamlandı olarak işaretlendi! 🎉
             </div>
           )}
+
           <form id="edit-task-form" onSubmit={handleSubmit} className="flex flex-col space-y-4">
             <div>
               <label className="mb-1 block text-sm text-[#667781]">Başlık</label>
@@ -154,6 +194,32 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
               </div>
             </div>
 
+            {/* Yeniden Aktifleştirme Bölümü */}
+            {isReactivating && (
+              <div className="rounded-lg bg-amber-50 p-3 border border-amber-300 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  Görev Tekrar Aktifleştirilecek
+                </div>
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  Bu görev daha önce tamamlanmıştı. Tekrar aktifleştirildiğinde WhatsApp grubuna bildirim ve görev linki gönderilecektir.
+                </p>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-amber-900">
+                    Aktifleştirme Nedeni <span className="text-red-500">* (Zorunlu)</span>
+                  </label>
+                  <textarea
+                    required
+                    value={reactivateReason}
+                    onChange={e => setReactivateReason(e.target.value)}
+                    placeholder="Neden tekrar aktifleştiriliyor? (Örn: Revize talep edildi, çağrı merkezi testi tekrarlanacak...)"
+                    className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] border border-amber-300 focus:outline-none focus:ring-1 focus:ring-amber-500 min-h-[60px]"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Tamamlama Notu */}
             {status === 'DONE' && (
               <div className="rounded bg-[#f0f2f5] p-3 border border-[#00A884]/30">
                 <label className="mb-1 block text-xs font-semibold text-[#00A884]">
@@ -162,7 +228,7 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
                 <textarea
                   value={completionNote}
                   onChange={e => setCompletionNote(e.target.value)}
-                  placeholder="Görev kapatma notu..."
+                  placeholder="Görev bitirme notunuzu yazın..."
                   className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[60px]"
                 />
               </div>
@@ -170,15 +236,30 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
 
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="text-sm text-[#667781]">Bitiş Tarihi</label>
-                <button
-                  type="button"
-                  onClick={copyTaskLink}
-                  className="inline-flex items-center gap-1 text-xs text-[#00A884] hover:underline"
-                >
-                  {copiedLink ? <Check className="h-3 w-3" /> : <LinkIcon className="h-3 w-3" />}
-                  {copiedLink ? 'Link Kopyalandı!' : 'Mobil Kapatma Linki'}
-                </button>
+                <label className="text-sm text-[#667781]">
+                  {isReactivating ? 'Yeni Bitiş Tarihi' : 'Bitiş Tarihi'}
+                </label>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/t/${task.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-[#00A884] hover:underline font-medium"
+                    title="Görevi ve kapatma sayfasını yeni sekmede aç"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Mobil Kapatma Sayfası
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="inline-flex items-center gap-1 text-[11px] text-[#54656f] hover:text-[#111b21] bg-white px-2 py-0.5 rounded border border-[#ccd0d5] shadow-sm active:bg-gray-100"
+                    title="Bağlantıyı panoya kopyala"
+                  >
+                    {copiedLink ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                    {copiedLink ? 'Kopyalandı!' : 'Kopyala'}
+                  </button>
+                </div>
               </div>
               <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
             </div>
@@ -215,7 +296,7 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
           <div className="flex space-x-2">
             <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm text-[#667781] hover:bg-[#f0f2f5]">İptal</button>
             <button form="edit-task-form" type="submit" disabled={loading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f] disabled:opacity-50">
-              {loading ? 'Kaydediliyor...' : 'Güncelle'}
+              {loading ? 'Kaydediliyor...' : isReactivating ? 'Tekrar Aktifleştir' : 'Güncelle'}
             </button>
           </div>
         </div>

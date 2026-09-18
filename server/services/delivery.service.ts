@@ -5,6 +5,8 @@ import { events } from '../lib/events';
 import { wahaService } from './waha.service';
 import { messageService } from './message.service';
 import { contactResolver } from './contact-resolver.service';
+import { urlShortenerService } from './url-shortener.service';
+import { mediaService } from './media.service';
 import { classifySendError, eventKey, istanbulDay, parseMessage, reminderDue, retryDelay } from '../lib/reliability';
 
 type DB = Prisma.TransactionClient;
@@ -19,7 +21,11 @@ export async function enqueue(db: DB, data: { operationKey: string; chatId: stri
     ON CONFLICT (operation_key) DO UPDATE SET operation_key = EXCLUDED.operation_key RETURNING id`;
   return db.outgoingJob.findUniqueOrThrow({ where: { id: rows[0].id } });
 }
-export function taskPayload(task: any, kind: 'TASK_CREATED' | 'TASK_COMPLETED') {
+export function taskPayload(
+  task: any,
+  kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED',
+  extra?: { reason?: string; by?: string }
+) {
   const mentions: string[] = [];
   const tags = task.assignees.map((a: any) => {
     const resolved = contactResolver.resolveAssigneeMention(a.contact);
@@ -27,13 +33,38 @@ export function taskPayload(task: any, kind: 'TASK_CREATED' | 'TASK_COMPLETED') 
     return resolved.tag;
   }).filter(Boolean).join(' ');
   const date = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' }) : 'Belirtilmedi';
-  let text = `${kind === 'TASK_CREATED' ? '📌 Yeni Görev' : '✅ Görev Tamamlandı'}\n\n*${task.title}*\n`;
-  if (task.description) text += `${task.description}\n`;
-  text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
-  if (kind === 'TASK_CREATED' && task.sourceMessage?.body) text += `\nKaynak mesaj: ${task.sourceMessage.body}\n`;
-  if (kind === 'TASK_COMPLETED' && task.completionNote) text += `\nKapanış notu: ${task.completionNote}\nKapatan: ${task.completedBy || '-'}\n`;
-  text += `\nGörevi incele: ${process.env.APP_URL}/t/${task.id}`;
-  return { text, mentions: [...new Set(mentions)] };
+  const taskUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+
+  let text = '';
+  if (kind === 'TASK_CREATED') {
+    text = `📌 *Yeni Görev*\n\n*${task.title}*\n`;
+    if (task.description) text += `${task.description}\n`;
+    text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
+    if (task.sourceMessage?.body) text += `\nKaynak mesaj: ${task.sourceMessage.body}\n`;
+    text += `\n🔗 Görevi incele: ${taskUrl}`;
+    return { text, mentions: [...new Set(mentions)], url: taskUrl };
+  }
+
+  if (kind === 'TASK_COMPLETED') {
+    text = `✅ *Görev Tamamlandı!*\n\n*${task.title}*\n`;
+    if (task.description) text += `${task.description}\n`;
+    text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
+    if (task.completionNote) text += `\n📝 *Kapanış notu:* ${task.completionNote}\n`;
+    if (task.completedBy) text += `✍️ *Kapatan:* ${task.completedBy}\n`;
+    // Kullanıcı kuralı: Görev tamamlandı bildirimine link koyulmaz
+    return { text: text.trim(), mentions: [...new Set(mentions)] };
+  }
+
+  if (kind === 'TASK_REACTIVATED') {
+    text = `🔄 *Görev Tekrar Aktifleştirildi!*\n\n*${task.title}*\n`;
+    if (task.description) text += `${task.description}\n`;
+    text += `Öncelik: ${task.priority}\n📅 *Yeni Bitiş:* ${date}\n👥 *Görevliler:* ${tags}\n✍️ *Aktifleştiren:* ${extra?.by || 'Yönetici'}\n`;
+    if (extra?.reason) text += `\n📝 *Aktifleştirme Nedeni:*\n"${extra.reason}"\n`;
+    text += `\n🔗 Görevi incele: ${taskUrl}`;
+    return { text, mentions: [...new Set(mentions)], url: taskUrl };
+  }
+
+  return { text: task.title, mentions: [] };
 }
 export async function acceptEvent(body: any) {
   const key = eventKey(body);
@@ -94,7 +125,15 @@ if(body.event==='message.reaction') {
 await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lockedUntil: null, lockToken: null, lastError: null } });
       return { message, updatedMessage, statusEvent: body.event === 'session.status' || body.event === 'state.change' };
     }, { timeout: 20_000 });
-    if (result?.message) events.emit('new_message', result.message);
+    if (result?.message) {
+      const msg = result.message;
+      events.emit('new_message', msg);
+      if (msg.mediaUrl && msg.messageType !== 'TEXT') {
+        void mediaService.downloadMedia(msg.id).catch(err => {
+          console.warn(`[EagerMedia] Could not eagerly download media for ${msg.id}:`, err?.message || err);
+        });
+      }
+    }
     if (result?.updatedMessage) events.emit('message_updated', result.updatedMessage);
     if (result?.statusEvent) void wahaService.reconcile().catch(() => {});
   } catch (error: any) {
@@ -108,20 +147,32 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
 
 async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[] } | null> {
   const payload = job.payload as any;
-  if (job.kind !== 'REMINDER') return { text: payload.text, mentions: payload.mentions || [] };
-  if (payload.day && payload.day !== istanbulDay()) return null;
-  const tasks = await prisma.task.findMany({ where: { id: { in: payload.taskIds }, status: { not: 'DONE' } }, include: { assignees: { include: { contact: true } } } });
-  if (!tasks.length) return null;
-  const mentions = new Set<string>();
-  const text = tasks.map(task => {
-    const tags = task.assignees.map(a => {
-      const resolved = contactResolver.resolveAssigneeMention(a.contact);
-      if (resolved.jid) mentions.add(resolved.jid);
-      return resolved.tag;
-    }).join(' ');
-    return `📋 *${task.title}*\n${tags}\n${process.env.APP_URL}/t/${task.id}`;
-  }).join('\n\n');
-  return { text: `🔔 Görev Hatırlatması\n\n${text}`, mentions: [...mentions] };
+  if (job.kind === 'REMINDER') {
+    if (payload.day && payload.day !== istanbulDay()) return null;
+    const tasks = await prisma.task.findMany({ where: { id: { in: payload.taskIds }, status: { not: 'DONE' } }, include: { assignees: { include: { contact: true } } } });
+    if (!tasks.length) return null;
+    const mentions = new Set<string>();
+    const textList = await Promise.all(tasks.map(async task => {
+      const tags = task.assignees.map(a => {
+        const resolved = contactResolver.resolveAssigneeMention(a.contact);
+        if (resolved.jid) mentions.add(resolved.jid);
+        return resolved.tag;
+      }).join(' ');
+      const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+      const shortLink = await urlShortenerService.shortenUrl(rawUrl);
+      return `📋 *${task.title}*\n${tags}\n🔗 ${shortLink}`;
+    }));
+    return { text: `🔔 *Görev Hatırlatması*\n\n${textList.join('\n\n')}`, mentions: [...mentions] };
+  }
+
+  let text = payload.text || '';
+  if (payload.url) {
+    const shortLink = await urlShortenerService.shortenUrl(payload.url);
+    if (shortLink && shortLink !== payload.url) {
+      text = text.replace(payload.url, shortLink);
+    }
+  }
+  return { text, mentions: payload.mentions || [] };
 }
 
 export async function processOutbox() {

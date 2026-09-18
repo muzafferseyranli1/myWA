@@ -9,8 +9,25 @@ async function attachNotification<T extends { id: string }>(task: T) {
   const job = await prisma.outgoingJob.findFirst({ where: { taskId: task.id }, orderBy: { sequence: 'desc' } });
   return { ...task, notification: job ? notificationView(job) : null };
 }
-async function queueTask(tx: Prisma.TransactionClient, task: any, kind: 'TASK_CREATED' | 'TASK_COMPLETED') {
-  await enqueue(tx, { operationKey: `${kind}:${task.id}:${kind === 'TASK_COMPLETED' ? task.completedAt.toISOString() : ''}`, chatId: task.chatId, taskId: task.id, kind, payload: taskPayload(task, kind) });
+async function queueTask(
+  tx: Prisma.TransactionClient,
+  task: any,
+  kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED',
+  extra?: { reason?: string; by?: string }
+) {
+  const timestamp = kind === 'TASK_COMPLETED'
+    ? (task.completedAt ? new Date(task.completedAt).toISOString() : new Date().toISOString())
+    : kind === 'TASK_REACTIVATED'
+    ? new Date().toISOString()
+    : '';
+  const operationKey = timestamp ? `${kind}:${task.id}:${timestamp}` : `${kind}:${task.id}`;
+  await enqueue(tx, {
+    operationKey,
+    chatId: task.chatId,
+    taskId: task.id,
+    kind,
+    payload: taskPayload(task, kind, extra)
+  });
 }
 function validate(data: any, creating = false) {
   if (creating && (typeof data.title !== 'string' || !data.title.trim() || typeof data.chatId !== 'string')) throw new Error('Başlık ve sohbet zorunludur');
@@ -45,21 +62,45 @@ export const taskService = {
     validate(data);
     const task = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`;
-      const previous = await tx.task.findUniqueOrThrow({ where: { id } });
+      const previous = await tx.task.findUniqueOrThrow({ where: { id }, include });
       if (data.assigneeIds !== undefined) {
         await tx.taskAssignee.deleteMany({ where: { taskId: id } });
         await tx.taskAssignee.createMany({ data: [...new Set(data.assigneeIds)].map(contactId => ({ taskId: id, contactId })) });
       }
+
+      const isCompleting = data.status === 'DONE' && previous.status !== 'DONE';
+      const isReactivating = previous.status === 'DONE' && data.status && data.status !== 'DONE';
+
       const updated = await tx.task.update({ where: { id }, data: {
         ...(data.title !== undefined ? { title: data.title.trim() } : {}),
         ...(data.description !== undefined ? { description: data.description } : {}),
         ...(data.priority !== undefined ? { priority: data.priority } : {}),
         ...(data.status !== undefined ? { status: data.status } : {}),
         ...(data.dueDate !== undefined ? { dueDate: data.dueDate ? new Date(data.dueDate) : null } : {}),
-        ...(data.status === 'DONE' && previous.status !== 'DONE' ? { completedAt: new Date() } : {}),
-        ...(data.status && data.status !== 'DONE' && previous.status === 'DONE' ? { completedAt: null, completionNote: null, completedBy: null } : {}),
+        ...(isCompleting ? {
+          completedAt: new Date(),
+          completionNote: data.completionNote?.trim() || 'Admin tarafından tamamlandı',
+          completedBy: data.completedBy?.trim() || 'Yönetici'
+        } : {}),
+        ...(isReactivating ? {
+          completedAt: null,
+          completionNote: null,
+          completedBy: null
+        } : {}),
+        ...(data.status === 'DONE' && !isCompleting && data.completionNote !== undefined ? {
+          completionNote: data.completionNote ? data.completionNote.trim() : null
+        } : {}),
       }, include });
-      if (data.status === 'DONE' && previous.status !== 'DONE') await queueTask(tx, updated, 'TASK_COMPLETED');
+
+      if (isCompleting) {
+        await queueTask(tx, updated, 'TASK_COMPLETED');
+      } else if (isReactivating) {
+        await queueTask(tx, updated, 'TASK_REACTIVATED', {
+          reason: data.reactivateReason?.trim() || 'Yeniden işleme alındı',
+          by: data.reactivatedBy?.trim() || 'Yönetici'
+        });
+      }
+
       return updated;
     });
     return attachNotification(task);

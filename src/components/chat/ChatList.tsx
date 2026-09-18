@@ -2,14 +2,19 @@
 import { useState } from 'react';
 import { Search, Users, Image as ImageIcon, Video, Mic, FileText } from 'lucide-react';
 import { cn, formatTime } from '../../lib/utils';
-export default function ChatList({chats,selectedChatId,onSelectChat,myJid}:{chats:any[];selectedChatId:string|null;onSelectChat:(id:string)=>void;myJid?:string}) {
+export default function ChatList({chats,selectedChatId,onSelectChat,myJid,onMarkAllRead}:{chats:any[];selectedChatId:string|null;onSelectChat:(id:string)=>void;myJid?:string;onMarkAllRead?:()=>void}) {
  const [search,setSearch]=useState(''),[filter,setFilter]=useState<'all'|'unread'|'groups'>('all');
  const list=(Array.isArray(chats)?chats:[]).filter(c=>(c.name||c.id||'').toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr'))&&(filter!=='unread'||c.unreadCount>0)&&(filter!=='groups'||c.isGroup)).sort((a,b)=>Date.parse(b.lastMessage?.timestamp||b.updatedAt)-Date.parse(a.lastMessage?.timestamp||a.updatedAt));
  const unreadChats=chats.filter(c=>c.unreadCount>0).length;
  return <div className="flex h-full flex-col bg-white">
   <div className="px-5 pb-4 pt-6"><h1 className="mb-5 text-[23px] font-bold tracking-tight text-[#111b21]">Sohbetler</h1>
    <div className="relative"><Search size={18} className="absolute left-4 top-3 text-[#667781]"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Aratın veya yeni sohbet başlatın" aria-label="Sohbet ara" className="w-full rounded-full bg-[#f0f2f5] py-2.5 pl-12 pr-4 text-[14px] outline-none focus:ring-2 focus:ring-[#d9fdd3]"/></div>
-   <div className="mt-3 flex gap-2">{([['all','Tümü'],['unread','Okunmamış'+(unreadChats?' '+unreadChats:'')],['groups','Gruplar']] as const).map(([id,label])=><button key={id} onClick={()=>setFilter(id)} className={cn('rounded-full border px-3 py-1.5 text-[13px]',filter===id?'border-[#b2ddb0] bg-[#d9fdd3] text-[#008069]':'border-[#e1e5e8] text-[#667781] hover:bg-[#f5f6f6]')}>{label}</button>)}</div>
+   <div className="mt-3 flex items-center justify-between gap-2">
+    <div className="flex gap-2">
+     {([['all','Tümü'],['unread','Okunmamış'+(unreadChats?' '+unreadChats:'')],['groups','Gruplar']] as const).map(([id,label])=><button key={id} onClick={()=>setFilter(id)} className={cn('rounded-full border px-3 py-1.5 text-[13px]',filter===id?'border-[#b2ddb0] bg-[#d9fdd3] text-[#008069]':'border-[#e1e5e8] text-[#667781] hover:bg-[#f5f6f6]')}>{label}</button>)}
+    </div>
+    {unreadChats>0&&onMarkAllRead&&<button onClick={onMarkAllRead} className="text-xs text-[#008069] hover:underline font-medium whitespace-nowrap">Tümünü Okundu Say</button>}
+   </div>
   </div>
   <div className="flex-1 overflow-y-auto px-2 pb-2">
    {!list.length && <p className="p-6 text-center text-sm text-[#667781]">{search?'Sohbet bulunamadı.':'Görüntülenecek sohbet yok.'}</p>}

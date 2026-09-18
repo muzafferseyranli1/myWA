@@ -44,3 +44,44 @@ test('ambiguous delivery never receives automatic retry classification', () => {
   assert.equal(classifySendError({ cause: { code: 'ECONNREFUSED' } }), 'RETRY');
   assert.ok(retryDelay(9) > retryDelay(1));
 });
+
+test('taskPayload formats TASK_COMPLETED without task link and includes note', async () => {
+  const { taskPayload } = await import('../server/services/delivery.service');
+  const mockTask = {
+    id: 'task-123',
+    title: 'Test Görevi',
+    description: 'Test açıklaması',
+    priority: 'HIGH',
+    dueDate: new Date('2026-09-30T00:00:00Z'),
+    assignees: [],
+    completionNote: 'Tamamlandı notu',
+    completedBy: 'Muzaffer'
+  };
+  const payload = taskPayload(mockTask, 'TASK_COMPLETED');
+  assert.ok(payload.text.includes('✅ *Görev Tamamlandı!*'));
+  assert.ok(payload.text.includes('Tamamlandı notu'));
+  assert.ok(payload.text.includes('Muzaffer'));
+  // KURAL: Görev tamamlandı bildirimine link konmaz
+  assert.ok(!payload.text.includes('/t/task-123'));
+  assert.ok(!payload.text.includes('Görevi incele'));
+});
+
+test('taskPayload formats TASK_REACTIVATED with reason, actor, and task link', async () => {
+  const { taskPayload } = await import('../server/services/delivery.service');
+  const mockTask = {
+    id: 'task-456',
+    title: 'Aktif Görev',
+    priority: 'MEDIUM',
+    dueDate: new Date('2026-10-05T00:00:00Z'),
+    assignees: []
+  };
+  const payload = taskPayload(mockTask, 'TASK_REACTIVATED', {
+    reason: 'Müşteri revize istedi',
+    by: 'Admin'
+  });
+  assert.ok(payload.text.includes('🔄 *Görev Tekrar Aktifleştirildi!*'));
+  assert.ok(payload.text.includes('Aktifleştirme Nedeni:'));
+  assert.ok(payload.text.includes('Müşteri revize istedi'));
+  assert.ok(payload.text.includes('Admin'));
+  assert.ok(payload.text.includes('/t/task-456'));
+});

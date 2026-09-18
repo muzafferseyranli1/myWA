@@ -43,7 +43,11 @@ export default function ChatDashboard(){
   const socket=getSocket();if(activeChat.current)socket.emit('leave_chat',activeChat.current);
   activeChat.current=id;version.current++;setSelected(id);setView('chat');setMessages([]);setTasks([]);setContacts([]);setHasMore(false);setNotice(null);
   socket.emit('join_chat',id);void fetchData(id);void fetchContacts(id);
- },[fetchData,fetchContacts]);
+  void fetch('/api/chats/'+encodeURIComponent(id)+'/read',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({all:true})}).then(()=>{void fetchChats();}).catch(()=>{});
+ },[fetchData,fetchContacts,fetchChats]);
+ const markAllChatsAsRead=useCallback(async()=>{
+  try{const res=await fetch('/api/chats/read-all',{method:'POST',headers:headers()});if(res.ok)void fetchChats();}catch{}
+ },[fetchChats]);
  useEffect(()=>{
   const token=localStorage.getItem('mywa_token');if(!token){router.push('/login');return;}
   let closed=false;
@@ -115,7 +119,7 @@ export default function ChatDashboard(){
     <button onClick={()=>{disconnectSocket();localStorage.removeItem('mywa_token');router.push('/login');}} title="Çıkış" aria-label="Çıkış" className="mt-auto p-3 text-[#54656f]"><LogOut size={23}/></button>
    </nav>
    {view==='chat'?<>
-    <aside className={'shrink-0 border-r border-[#e9edef] md:block md:w-[340px] lg:w-[380px] xl:w-[420px] '+(selected?'hidden':'w-full')}><ChatList chats={chats} selectedChatId={selected} onSelectChat={selectChat} myJid={myJid}/></aside>
+    <aside className={'shrink-0 border-r border-[#e9edef] md:block md:w-[340px] lg:w-[380px] xl:w-[420px] '+(selected?'hidden':'w-full')}><ChatList chats={chats} selectedChatId={selected} onSelectChat={selectChat} myJid={myJid} onMarkAllRead={markAllChatsAsRead}/></aside>
     <main className={'relative min-w-0 flex-1 '+(!selected?'hidden md:block':'')}>
      {selected?<ChatWindow key={selected} chatId={selected} chatName={currentChat?.name} avatarUrl={currentChat?.avatarUrl} messages={messages} contacts={contacts} myJid={myJid} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={older} onRead={read} tasksOpen={showTasks} taskCount={tasks.filter(t=>t.status!=='DONE').length} onToggleTasks={()=>setShowTasks(!showTasks)} onBack={()=>{activeChat.current=null;setSelected(null);}}/>:<div className="flex h-full flex-col items-center justify-center bg-[#f7f8fa] px-10 text-center"><MessageCircle size={64} strokeWidth={1} className="text-[#00a884]"/><h2 className="mt-6 text-[28px] font-light">MyWA</h2><p className="mt-3 max-w-sm text-[14px] leading-6 text-[#667781]">Sohbetlerinizi ve görevlerinizi tek panelden takip edin.<br/>Başlamak için bir sohbet seçin.</p>{sync?.roundUntil&&<p className="mt-5 text-xs text-[#667781]">WhatsApp geçmişi eşitleniyor…</p>}</div>}
      {notice&&<button onClick={()=>selectChat(notice.chatId)} className="absolute right-5 top-5 z-20 max-w-xs rounded-xl border border-[#d9fdd3] bg-white p-4 text-left shadow-lg"><p className="text-sm font-semibold text-[#008069]">{notice.title}</p><p className="mt-1 line-clamp-2 text-[13px] text-[#667781]">{notice.body||'Yeni medya iletisi'}</p></button>}

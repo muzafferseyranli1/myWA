@@ -40,10 +40,15 @@ router.post('/', requireAuth, async (req: any, res) => {
   }
 });
 
-router.patch('/:id', requireAuth, async (req, res) => {
+router.patch('/:id', requireAuth, async (req: any, res) => {
   try {
     const taskId = String(req.params.id);
-    const task = await taskService.updateTask(taskId, req.body);
+    const actor = req.user?.displayName || req.user?.email || 'Yönetici';
+    const task = await taskService.updateTask(taskId, {
+      ...req.body,
+      completedBy: req.body.completedBy || actor,
+      reactivatedBy: req.body.reactivatedBy || actor,
+    });
     broadcastTaskUpdated(task);
     res.json(task);
   } catch (error: any) {

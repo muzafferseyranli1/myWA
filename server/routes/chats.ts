@@ -27,14 +27,51 @@ router.get('/:chatId/messages',async(req,res)=>{
   res.json({...result,messages:result.messages.map(m=>({...m,reactions:reactions.filter(r=>r.messageId===m.id)}))});
  }catch{res.status(500).json({error:'Mesajlar alınamadı.'});}
 });
-router.post('/:chatId/read',async(req,res)=>{
- const ids=req.body?.messageIds;
- if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'))return res.status(400).json({error:'Invalid message IDs'});
- try{
-  const messages=await prisma.message.findMany({where:{chatId:req.params.chatId as string,id:{in:ids},isFromMe:false},select:{id:true}});
-  await prisma.messageRead.createMany({data:messages.map(m=>({userId:(req as any).user.id,messageId:m.id})),skipDuplicates:true});
-  res.json({success:true});
- }catch{res.status(503).json({error:'Okunma kaydedilemedi.'});}
+router.post('/read-all', async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    await prisma.$executeRaw`
+      INSERT INTO message_reads (user_id, message_id, read_at)
+      SELECT ${userId}, m.id, NOW()
+      FROM messages m
+      LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ${userId}
+      WHERE m.is_from_me = false AND m.revoked = false AND r.message_id IS NULL
+      ON CONFLICT DO NOTHING
+    `;
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Okundu işaretlenemedi.' });
+  }
+});
+router.post('/:chatId/read', async (req: any, res) => {
+  const chatId = req.params.chatId as string;
+  const userId = req.user.id;
+  const ids = req.body?.messageIds;
+  const markAll = req.body?.all === true || !ids;
+
+  try {
+    if (markAll) {
+      await prisma.$executeRaw`
+        INSERT INTO message_reads (user_id, message_id, read_at)
+        SELECT ${userId}, m.id, NOW()
+        FROM messages m
+        LEFT JOIN message_reads r ON r.message_id = m.id AND r.user_id = ${userId}
+        WHERE m.chat_id = ${chatId} AND m.is_from_me = false AND m.revoked = false AND r.message_id IS NULL
+        ON CONFLICT DO NOTHING
+      `;
+      return res.json({ success: true });
+    }
+
+    if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string')) {
+      return res.status(400).json({ error: 'Invalid message IDs' });
+    }
+
+    const messages = await prisma.message.findMany({ where: { chatId, id: { in: ids }, isFromMe: false }, select: { id: true } });
+    await prisma.messageRead.createMany({ data: messages.map(m => ({ userId, messageId: m.id })), skipDuplicates: true });
+    res.json({ success: true });
+  } catch {
+    res.status(503).json({ error: 'Okunma kaydedilemedi.' });
+  }
 });
 router.get('/:chatId/tasks',async(req,res)=>{
  try{res.json(await taskService.getTasksByChat(req.params.chatId as string));}catch{res.status(500).json({error:'Görevler alınamadı.'});}

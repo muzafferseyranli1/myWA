@@ -97,6 +97,10 @@ export interface UpdateTaskRequest {
   priority?: TaskPriority;
   dueDate?: string | null;
   assigneeIds?: string[];
+  completionNote?: string | null;
+  completedBy?: string | null;
+  reactivateReason?: string | null;
+  reactivatedBy?: string | null;
 }
 
 export interface KanbanStats {
