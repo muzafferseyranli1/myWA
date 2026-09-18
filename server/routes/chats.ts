@@ -1,145 +1,58 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
+import { taskService } from '../services/task.service';
 import { messageService } from '../services/message.service';
 import { requireAuth } from '../middleware/auth';
 import { contactResolver } from '../services/contact-resolver.service';
-
-const router = Router();
-
-router.get('/', requireAuth, async (req, res) => {
-  try {
-    const chats = await prisma.chat.findMany({
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        _count: {
-          select: { tasks: true }
-        },
-        messages: {
-          orderBy: { timestamp: 'desc' },
-          take: 1
-        }
-      }
-    });
-
-    const chatsWithLastMessage = chats.map((chat) => {
-      const { messages, ...rest } = chat as any;
-      let name = chat.name;
-      if (!chat.isGroup) {
-        const isSelf = chat.id.includes('905332760534') || chat.id === '31933115404296@lid';
-        const resolved = contactResolver.getDisplayNameSync(chat.id);
-        const rawId = chat.id.split('@')[0];
-        if (resolved && resolved !== rawId && !resolved.includes('@') && !/^\d{10,16}$/.test(resolved)) {
-          if (isSelf || resolved !== 'Muzaffer') {
-            name = resolved;
-          }
-        }
-        if (!isSelf && name === 'Muzaffer') {
-          name = (resolved && resolved !== 'Muzaffer' && !/^\d{10,16}$/.test(resolved)) ? resolved : rawId;
-        }
-        if (/^90\d{10}$/.test(name)) {
-          name = `+90 ${name.substring(2, 5)} ${name.substring(5, 8)} ${name.substring(8, 10)} ${name.substring(10, 12)}`;
-        }
-      }
-      return { ...rest, name, lastMessage: messages[0] || null };
-    });
-
-    res.json(chatsWithLastMessage);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch chats' });
-  }
+const router=Router();
+router.use(requireAuth);
+router.get('/',async(req,res)=>{
+ try{
+  const chats=await prisma.chat.findMany({orderBy:{updatedAt:'desc'},include:{_count:{select:{tasks:true}},messages:{orderBy:[{timestamp:'desc'},{id:'desc'}],take:1}}});
+  const counts=await prisma.$queryRaw<{chat_id:string;count:bigint}[]>`SELECT m.chat_id,COUNT(*) AS count FROM messages m LEFT JOIN message_reads r ON r.message_id=m.id AND r.user_id=${(req as any).user.id} WHERE m.is_from_me=false AND m.revoked=false AND r.message_id IS NULL GROUP BY m.chat_id`;
+  const unread=new Map(counts.map(row=>[row.chat_id,Number(row.count)]));
+  res.json(chats.map(chat=>{
+   const {messages,...rest}=chat;
+   const resolved=contactResolver.getDisplayNameSync(chat.id);
+   const name=!chat.isGroup&&resolved&&!resolved.includes('@')&&!/^\d+$/.test(resolved)?resolved:chat.name;
+   return {...rest,name,unreadCount:unread.get(chat.id)||0,lastMessage:messages[0]?{...messages[0],mediaUrl:null}:null};
+  }));
+ }catch{res.status(500).json({error:'Sohbetler alınamadı.'});}
 });
-
-router.get('/:chatId/messages', requireAuth, async (req, res) => {
-  try {
-    const chatId = req.params.chatId as string;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 50;
-
-    const result = await messageService.getMessagesByChat(chatId, page, limit);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch messages' });
-  }
+router.get('/:chatId/messages',async(req,res)=>{
+ try{
+  const page=Math.max(1,parseInt(req.query.page as string)||1),limit=Math.max(1,Math.min(100,parseInt(req.query.limit as string)||50));
+  const result=await messageService.getMessagesByChat(req.params.chatId as string,page,limit,typeof req.query.before==='string'?req.query.before:undefined);
+  const reactions=await prisma.messageReaction.findMany({where:{messageId:{in:result.messages.map(m=>m.id)}}});
+  res.json({...result,messages:result.messages.map(m=>({...m,reactions:reactions.filter(r=>r.messageId===m.id)}))});
+ }catch{res.status(500).json({error:'Mesajlar alınamadı.'});}
 });
-
-router.get('/:chatId/tasks', requireAuth, async (req, res) => {
-  try {
-    const chatId = req.params.chatId as string;
-    const tasks = await prisma.task.findMany({
-      where: { chatId },
-      include: {
-        assignees: {
-          include: {
-            contact: true
-          }
-        },
-        chat: true,
-        sourceMessage: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json(tasks);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch tasks' });
-  }
+router.post('/:chatId/read',async(req,res)=>{
+ const ids=req.body?.messageIds;
+ if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'))return res.status(400).json({error:'Invalid message IDs'});
+ try{
+  const messages=await prisma.message.findMany({where:{chatId:req.params.chatId as string,id:{in:ids},isFromMe:false},select:{id:true}});
+  await prisma.messageRead.createMany({data:messages.map(m=>({userId:(req as any).user.id,messageId:m.id})),skipDuplicates:true});
+  res.json({success:true});
+ }catch{res.status(503).json({error:'Okunma kaydedilemedi.'});}
 });
-
-router.get('/:chatId/contacts', requireAuth, async (req, res) => {
-  try {
-    const chatId = req.params.chatId as string;
-    
-    // Try GroupParticipant first
-    const participants = await prisma.groupParticipant.findMany({
-      where: { chatId },
-      include: { contact: true }
-    });
-    if (participants.length > 0) {
-      return res.json(participants.map(p => {
-        const c = p.contact;
-        const mappedJid = c.id.endsWith('@lid') ? contactResolver.resolveToMentionJid(c.id) : null;
-        const realPhone = mappedJid ? mappedJid.split('@')[0] : (!contactResolver.isLid(c.phoneNumber) ? c.phoneNumber : null);
-        const name = c.displayName || c.pushName || contactResolver.getDisplayNameSync(c.id) || (mappedJid ? contactResolver.getDisplayNameSync(mappedJid) : null);
-
-        return {
-          id: c.id,
-          lidId: c.lidId || (c.id.endsWith('@lid') ? c.id : null),
-          phoneNumber: realPhone || c.phoneNumber,
-          pushName: name || c.pushName,
-          displayName: c.displayName || name,
-          mappedJid: mappedJid || null,
-          role: p.role
-        };
-      }));
-    }
-    
-    // Fallback: unique message senders
-    const senders = await prisma.message.findMany({
-      where: { chatId, senderId: { not: null } },
-      select: { senderId: true },
-      distinct: ['senderId']
-    });
-
-    const contacts = await prisma.contact.findMany({
-      where: { id: { in: senders.map(s => s.senderId!).filter(Boolean) } }
-    });
-
-    res.json(contacts.map(c => {
-      const mappedJid = c.id.endsWith('@lid') ? contactResolver.resolveToMentionJid(c.id) : null;
-      const realPhone = mappedJid ? mappedJid.split('@')[0] : (!contactResolver.isLid(c.phoneNumber) ? c.phoneNumber : null);
-      const name = c.displayName || c.pushName || contactResolver.getDisplayNameSync(c.id) || (mappedJid ? contactResolver.getDisplayNameSync(mappedJid) : null);
-
-      return {
-        id: c.id,
-        lidId: c.lidId || (c.id.endsWith('@lid') ? c.id : null),
-        phoneNumber: realPhone || c.phoneNumber,
-        pushName: name || c.pushName,
-        displayName: c.displayName || name,
-        mappedJid: mappedJid || null
-      };
-    }));
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch contacts' });
-  }
+router.get('/:chatId/tasks',async(req,res)=>{
+ try{res.json(await taskService.getTasksByChat(req.params.chatId as string));}catch{res.status(500).json({error:'Görevler alınamadı.'});}
 });
-
+router.get('/:chatId/contacts',async(req,res)=>{
+ try{
+  const chatId=req.params.chatId as string;
+  const participants=await prisma.groupParticipant.findMany({where:{chatId},include:{contact:true}});
+  let contacts=participants.map(p=>({...p.contact,role:p.role}));
+  if(!contacts.length){
+   const senders=await prisma.message.findMany({where:{chatId,senderId:{not:null}},select:{senderId:true},distinct:['senderId']});
+   contacts=(await prisma.contact.findMany({where:{id:{in:senders.map(s=>s.senderId!).filter(Boolean)}}})).map(c=>({...c,role:'member'}));
+  }
+  res.json(contacts.map(c=>{
+   const mappedJid=c.id.endsWith('@lid')?contactResolver.resolveToMentionJid(c.id):null;
+   const name=c.displayName||c.pushName||contactResolver.getDisplayNameSync(c.id);
+   return {...c,pushName:name||c.pushName,displayName:c.displayName||name,mappedJid,lidId:c.lidId||(c.id.endsWith('@lid')?c.id:null)};
+  }));
+ }catch{res.status(500).json({error:'Kişiler alınamadı.'});}
+});
 export default router;

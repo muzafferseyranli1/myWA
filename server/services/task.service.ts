@@ -1,318 +1,103 @@
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
-import { whatsappService } from './whatsapp.service';
-import { contactResolver } from './contact-resolver.service';
-import { urlShortenerService } from './url-shortener.service';
+import { enqueue, taskPayload, notificationView } from './delivery.service';
 
+const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true };
+async function attachNotification<T extends { id: string }>(task: T) {
+  const job = await prisma.outgoingJob.findFirst({ where: { taskId: task.id }, orderBy: { sequence: 'desc' } });
+  return { ...task, notification: job ? notificationView(job) : null };
+}
+async function queueTask(tx: Prisma.TransactionClient, task: any, kind: 'TASK_CREATED' | 'TASK_COMPLETED') {
+  await enqueue(tx, { operationKey: `${kind}:${task.id}:${kind === 'TASK_COMPLETED' ? task.completedAt.toISOString() : ''}`, chatId: task.chatId, taskId: task.id, kind, payload: taskPayload(task, kind) });
+}
+function validate(data: any, creating = false) {
+  if (creating && (typeof data.title !== 'string' || !data.title.trim() || typeof data.chatId !== 'string')) throw new Error('Başlık ve sohbet zorunludur');
+  if (data.title !== undefined && (typeof data.title !== 'string' || !data.title.trim() || data.title.length > 500)) throw new Error('Geçersiz başlık');
+  if (data.status !== undefined && !['TODO', 'IN_PROGRESS', 'DONE'].includes(data.status)) throw new Error('Geçersiz durum');
+  if (data.priority !== undefined && !['LOW', 'MEDIUM', 'HIGH', 'URGENT'].includes(data.priority)) throw new Error('Geçersiz öncelik');
+  if (data.dueDate && !Number.isFinite(new Date(data.dueDate).getTime())) throw new Error('Geçersiz tarih');
+  if (data.assigneeIds !== undefined && (!Array.isArray(data.assigneeIds) || data.assigneeIds.some((id: any) => typeof id !== 'string'))) throw new Error('Geçersiz görevliler');
+  if (data.clientRequestId !== undefined && (typeof data.clientRequestId !== 'string' || !data.clientRequestId || data.clientRequestId.length > 128)) throw new Error('Geçersiz işlem kimliği');
+}
 export const taskService = {
-  async createTask(data: CreateTaskRequest & { createdBy?: string, notifyOnCreate?: boolean }) {
-    const task = await prisma.task.create({
-      data: {
-        title: data.title,
-        description: data.description || null,
-        chatId: data.chatId,
-        sourceMessageId: data.sourceMessageId || null,
-        status: 'TODO',
-        priority: data.priority || 'MEDIUM',
-        dueDate: data.dueDate ? new Date(data.dueDate) : null,
-        createdBy: data.createdBy || null,
+  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; clientRequestId?: string }) {
+    validate(data, true);
+    const requestKey = `${data.createdBy}:${data.clientRequestId || randomUUID()}`;
+    const task = await prisma.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${requestKey}, 0))`;
+      const existing = await tx.task.findUnique({ where: { requestKey }, include });
+      if (existing) return existing;
+      const created = await tx.task.create({ data: {
+        requestKey, title: data.title.trim(), description: data.description || null, chatId: data.chatId,
+        sourceMessageId: data.sourceMessageId || null, priority: data.priority || 'MEDIUM',
+        dueDate: data.dueDate ? new Date(data.dueDate) : null, createdBy: data.createdBy || null,
         notifyOnCreate: data.notifyOnCreate !== false,
-        assignees: {
-          create: (data.assigneeIds || []).map(contactId => ({
-            contactId
-          }))
-        }
-      },
-      include: {
-        assignees: {
-          include: {
-            contact: true
-          }
-        },
-        chat: true,
-        sourceMessage: true
-      }
+        assignees: { create: [...new Set(data.assigneeIds || [])].map(contactId => ({ contactId })) },
+      }, include });
+      if (created.notifyOnCreate) await queueTask(tx, created, 'TASK_CREATED');
+      return created;
     });
-
-    if (data.notifyOnCreate !== false && task.chatId) {
-      try {
-        const assigneeContacts = await prisma.taskAssignee.findMany({
-          where: { taskId: task.id },
-          include: { contact: true }
-        });
-        
-        const priorityEmoji: Record<string, string> = { LOW: '🟢', MEDIUM: '🟡', HIGH: '🟠', URGENT: '🔴' };
-        const priorityLabel: Record<string, string> = { LOW: 'Düşük', MEDIUM: 'Orta', HIGH: 'Yüksek', URGENT: 'Acil' };
-        const dueDateStr = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Belirtilmedi';
-
-        // Build assignee mention tags: @905332760534 (virgülsüz, boşlukla ayrılmış)
-        const mentionJids: string[] = [];
-        const assigneeTags = assigneeContacts.map(a => {
-          const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact);
-          if (jid) mentionJids.push(jid);
-          return tag;
-        }).filter(Boolean).join(' ');
-        
-        const mentions = [...new Set(mentionJids)];
-        
-        let message = `📌 *Yeni Görev Oluşturuldu!*\n\n`;
-        message += `📋 *${task.title}*\n`;
-        if (task.description) message += `📝 ${task.description}\n`;
-        message += `⚡ Öncelik: ${priorityEmoji[task.priority] || '🟡'} ${priorityLabel[task.priority] || task.priority}\n`;
-        message += `📅 Bitiş: ${dueDateStr}\n`;
-        if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
-        
-        // Include full source message text with resolved readable names
-        const sourceBody = (data as any).sourceMessageBody || task.sourceMessage?.body;
-        if (sourceBody) {
-          const readableSourceBody = await contactResolver.formatMentionsToNames(sourceBody);
-          message += `\n💬 _Kaynak mesaj:_\n_"${readableSourceBody}"_`;
-        }
-
-        const baseUrl = process.env.APP_URL!;
-        const taskUrl = await urlShortenerService.shortenUrl(`${baseUrl}/t/${task.id}`);
-        message += `\n\n🔗 *Görevi İncele & Kapat:*\n${taskUrl}`;
-        
-        await whatsappService.sendMessage(task.chatId, message, mentions);
-      } catch (e) {
-        console.error('Task WA notification error:', e);
-      }
-    }
-
-    return task;
+    return attachNotification(task);
   },
-
   async updateTask(id: string, data: UpdateTaskRequest) {
-    const updateData: any = { ...data };
-    delete updateData.assigneeIds;
-    
-    if (updateData.dueDate !== undefined) {
-      updateData.dueDate = updateData.dueDate ? new Date(updateData.dueDate) : null;
-    }
-
-    const updatedTask = await prisma.$transaction(async (tx) => {
+    validate(data);
+    const task = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`;
+      const previous = await tx.task.findUniqueOrThrow({ where: { id } });
       if (data.assigneeIds !== undefined) {
-        await tx.taskAssignee.deleteMany({
-          where: { taskId: id }
-        });
-        
-        if (data.assigneeIds.length > 0) {
-          await tx.taskAssignee.createMany({
-            data: data.assigneeIds.map(contactId => ({
-              taskId: id,
-              contactId
-            }))
-          });
-        }
+        await tx.taskAssignee.deleteMany({ where: { taskId: id } });
+        await tx.taskAssignee.createMany({ data: [...new Set(data.assigneeIds)].map(contactId => ({ taskId: id, contactId })) });
       }
-
-      return await tx.task.update({
-        where: { id },
-        data: updateData,
-        include: {
-          assignees: {
-            include: {
-              contact: true
-            }
-          },
-          chat: true,
-          sourceMessage: true
-        }
-      });
+      const updated = await tx.task.update({ where: { id }, data: {
+        ...(data.title !== undefined ? { title: data.title.trim() } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.priority !== undefined ? { priority: data.priority } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.dueDate !== undefined ? { dueDate: data.dueDate ? new Date(data.dueDate) : null } : {}),
+        ...(data.status === 'DONE' && previous.status !== 'DONE' ? { completedAt: new Date() } : {}),
+        ...(data.status && data.status !== 'DONE' && previous.status === 'DONE' ? { completedAt: null, completionNote: null, completedBy: null } : {}),
+      }, include });
+      if (data.status === 'DONE' && previous.status !== 'DONE') await queueTask(tx, updated, 'TASK_COMPLETED');
+      return updated;
     });
-
-    if (data.status === 'DONE' && updatedTask.chatId) {
-      try {
-        const assignees = await prisma.taskAssignee.findMany({
-          where: { taskId: id },
-          include: { contact: true }
-        });
-        const mentionJids: string[] = [];
-        const assigneeTags = assignees.map(a => {
-          const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact);
-          if (jid) mentionJids.push(jid);
-          return tag;
-        }).filter(Boolean).join(' ');
-        const mentions = [...new Set(mentionJids)];
-        let message = `✅ *Görev Tamamlandı!*\n\n📋 *${updatedTask.title}*\n`;
-        if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
-        message += `Durum: ✅ Tamamlandı`;
-        await whatsappService.sendMessage(updatedTask.chatId, message, mentions);
-      } catch (e) {
-        console.error('Task completion WA notification error:', e);
-      }
-    }
-
-    return updatedTask;
+    return attachNotification(task);
   },
-
+  async closeTask(id: string, data: { completionNote: string; completedBy?: string }) {
+    const task = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`;
+      const previous = await tx.task.findUniqueOrThrow({ where: { id }, include });
+      if (previous.status === 'DONE') return previous;
+      const updated = await tx.task.update({ where: { id }, data: { status: 'DONE', completionNote: data.completionNote, completedBy: data.completedBy || null, completedAt: new Date() }, include });
+      await queueTask(tx, updated, 'TASK_COMPLETED');
+      return updated;
+    });
+    return attachNotification(task);
+  },
   async deleteTask(id: string) {
-    return await prisma.task.delete({
-      where: { id }
+    return prisma.$transaction(async tx => {
+      await tx.outgoingJob.updateMany({ where: { taskId: id, status: 'PENDING' }, data: { status: 'CANCELLED' } });
+      return tx.task.delete({ where: { id } });
     });
   },
-
   async getTasksByChat(chatId: string) {
-    return await prisma.task.findMany({
-      where: { chatId },
-      include: {
-        assignees: {
-          include: {
-            contact: true
-          }
-        },
-        chat: true,
-        sourceMessage: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    return Promise.all((await prisma.task.findMany({ where: { chatId }, include, orderBy: { createdAt: 'desc' } })).map(attachNotification));
   },
-
   async getKanbanData(filters: any = {}) {
-    const where: any = {};
+    const where: Prisma.TaskWhereInput = {};
     if (filters.chatId) where.chatId = filters.chatId;
     if (filters.status) where.status = filters.status;
     if (filters.priority) where.priority = filters.priority;
-    if (filters.assigneeId) {
-      where.assignees = {
-        some: {
-          contactId: filters.assigneeId
-        }
-      };
-    }
-
-    const tasks = await prisma.task.findMany({
-      where,
-      include: {
-        assignees: {
-          include: {
-            contact: true
-          }
-        },
-        chat: true,
-        sourceMessage: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const now = new Date();
-    
-    return {
-      tasks,
-      stats: {
-        total: tasks.length,
-        todo: tasks.filter(t => t.status === 'TODO').length,
-        inProgress: tasks.filter(t => t.status === 'IN_PROGRESS').length,
-        done: tasks.filter(t => t.status === 'DONE').length,
-        overdue: tasks.filter(t => t.dueDate && t.dueDate < now && t.status !== 'DONE').length
-      }
-    };
+    if (filters.assigneeId) where.assignees = { some: { contactId: filters.assigneeId } };
+    const tasks = await Promise.all((await prisma.task.findMany({ where, include, orderBy: { createdAt: 'desc' } })).map(attachNotification));
+    return { tasks, stats: { total: tasks.length, todo: tasks.filter(t => t.status === 'TODO').length, inProgress: tasks.filter(t => t.status === 'IN_PROGRESS').length, done: tasks.filter(t => t.status === 'DONE').length, overdue: tasks.filter(t => t.dueDate && t.dueDate < new Date() && t.status !== 'DONE').length } };
   },
-
   async getOverdueTasks() {
-    const now = new Date();
-    return await prisma.task.findMany({
-      where: {
-        dueDate: {
-          lt: now
-        },
-        status: {
-          not: 'DONE'
-        }
-      },
-      include: {
-        assignees: {
-          include: {
-            contact: true
-          }
-        },
-        chat: true,
-        sourceMessage: true
-      }
-    });
+    return prisma.task.findMany({ where: { dueDate: { lt: new Date() }, status: { not: 'DONE' } }, include });
   },
-
   async getTaskById(id: string) {
-    return await prisma.task.findUnique({
-      where: { id },
-      include: {
-        assignees: {
-          include: {
-            contact: true
-          }
-        },
-        chat: true,
-        sourceMessage: true
-      }
-    });
+    const task = await prisma.task.findUnique({ where: { id }, include });
+    return task ? attachNotification(task) : null;
   },
-
-  async closeTask(id: string, data: { completionNote: string; completedBy?: string }) {
-    const existingTask = await prisma.task.findUnique({
-      where: { id },
-      include: {
-        assignees: { include: { contact: true } },
-        chat: true,
-        sourceMessage: true
-      }
-    });
-
-    if (!existingTask) {
-      throw new Error('Görev bulunamadı');
-    }
-
-    if (existingTask.status === 'DONE') {
-      return existingTask;
-    }
-
-    const completedAt = new Date();
-    const updatedTask = await prisma.task.update({
-      where: { id },
-      data: {
-        status: 'DONE',
-        completionNote: data.completionNote,
-        completedBy: data.completedBy || null,
-        completedAt
-      },
-      include: {
-        assignees: { include: { contact: true } },
-        chat: true,
-        sourceMessage: true
-      }
-    });
-
-    // WhatsApp grubuna detaylı kapanış bildirimi gönder
-    if (updatedTask.chatId) {
-      try {
-        const mentionJids: string[] = [];
-        const assigneeTags = updatedTask.assignees.map(a => {
-          const { tag, jid } = contactResolver.resolveAssigneeMention(a.contact);
-          if (jid) mentionJids.push(jid);
-          return tag;
-        }).filter(Boolean).join(' ');
-        const mentions = [...new Set(mentionJids)];
-
-        const formattedDate = completedAt.toLocaleString('tr-TR', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-
-        let message = `✅ *Görev Tamamlandı ve Kapatıldı!*\n\n`;
-        message += `📋 *${updatedTask.title}*\n`;
-        if (assigneeTags) message += `👤 Görevliler: ${assigneeTags}\n`;
-        if (data.completedBy) message += `✍️ Kapatan: *${data.completedBy}*\n`;
-        message += `📝 *Kapanış Notu:*\n"${data.completionNote}"\n\n`;
-        message += `⏰ ${formattedDate}`;
-
-        await whatsappService.sendMessage(updatedTask.chatId, message, mentions);
-      } catch (e) {
-        console.error('Task close WA notification error:', e);
-      }
-    }
-
-    return updatedTask;
-  }
 };

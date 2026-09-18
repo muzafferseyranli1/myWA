@@ -5,6 +5,7 @@ import { MessageSquare, CheckSquare, Smartphone } from 'lucide-react-native';
 import { ChatListScreen } from '../screens/ChatListScreen';
 import { KanbanScreen } from '../screens/KanbanScreen';
 import { WhatsAppStatusScreen } from '../screens/WhatsAppStatusScreen';
+import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { COLORS } from '../lib/constants';
 
 const Tab = createBottomTabNavigator();
@@ -48,6 +49,7 @@ export const TabNavigator = () => {
           tabBarIcon: ({ color, size }) => <CheckSquare size={size} color={color} />,
         }}
       />
+      <Tab.Screen name="NotificationsTab" component={NotificationsScreen} options={{ tabBarLabel: 'Bildirimler', tabBarIcon: ({color,size}) => <CheckSquare size={size} color={color} /> }} />
       <Tab.Screen
         name="StatusTab"
         component={WhatsAppStatusScreen}

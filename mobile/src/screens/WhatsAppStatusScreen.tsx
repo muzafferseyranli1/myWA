@@ -37,6 +37,7 @@ export const WhatsAppStatusScreen = () => {
   }, []);
 
   useSocket({
+    onReconnect: () => { void fetchStatus(); },
     onStatus: (newStatus) => {
       setStatus(newStatus);
     },
@@ -120,7 +121,7 @@ export const WhatsAppStatusScreen = () => {
           )}
 
           {/* Action Buttons */}
-          <View style={styles.actionsRow}>
+          {user?.role === 'ADMIN' && <View style={styles.actionsRow}>
             {!isConnected ? (
               <TouchableOpacity
                 style={[styles.primaryBtn, loading && styles.btnDisabled]}
@@ -152,9 +153,9 @@ export const WhatsAppStatusScreen = () => {
               onPress={() => handleConnect(true)}
               disabled={loading}
             >
-              <Text style={styles.secondaryBtnText}>Oturumu Sıfırla</Text>
+              <Text style={styles.secondaryBtnText}>Bağlantıyı kontrol et</Text>
             </TouchableOpacity>
-          </View>
+          </View>}
         </View>
 
         {/* User Card */}

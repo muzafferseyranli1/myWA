@@ -10,14 +10,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  AppState,
 } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
+import { useRoute, useNavigation, useIsFocused } from '@react-navigation/native';
 import { ArrowLeft, Send, Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Header } from '../components/Header';
 import { MessageBubble } from '../components/MessageBubble';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { chatsApi } from '../api/chats.api';
+import {apiClient} from '../api/client';
 import { tasksApi } from '../api/tasks.api';
 import { ChatItem, MessageItem, ContactItem, CreateTaskRequest } from '../lib/types';
 import { COLORS } from '../lib/constants';
@@ -25,6 +27,7 @@ import { useSocket } from '../hooks/useSocket';
 
 export const ChatWindowScreen = () => {
   const insets = useSafeAreaInsets();
+  const focused=useIsFocused(),focusedRef=useRef(false); focusedRef.current=focused;
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const chat: ChatItem = route.params?.chat;
@@ -36,16 +39,27 @@ export const ChatWindowScreen = () => {
   const [taskModalVisible, setTaskModalVisible] = useState(false);
   const [selectedMessageForTask, setSelectedMessageForTask] = useState<MessageItem | null>(null);
 
+  const pendingMessage = useRef<{ id: string; text: string } | null>(null);
+  const requestVersion = useRef(0);
   const flatListRef = useRef<FlatList>(null);
+ const readIds=useRef(new Set<string>()),reading=useRef(false);
+ const onVisible=useRef(({viewableItems}:any)=>{
+  if(!focusedRef.current||AppState.currentState!=='active'||reading.current)return;
+  const incoming=viewableItems.map((v:any)=>v.item as MessageItem).filter((m:MessageItem)=>!m.isFromMe&&!readIds.current.has(m.id)).slice(0,100);
+  if(!incoming.length)return;reading.current=true;
+  void apiClient.post('/api/chats/'+encodeURIComponent(incoming[0].chatId)+'/read',{messageIds:incoming.map((m:MessageItem)=>m.id)}).then(()=>incoming.forEach((m:MessageItem)=>readIds.current.add(m.id))).catch(()=>{}).finally(()=>{reading.current=false;});
+ }).current;
   const isInitialScrollDone = useRef(false);
 
   const { joinChat, leaveChat, sendMessage } = useSocket({
+    onMessageUpdated: () => { void loadData(); },
     onNewMessage: (msg) => {
       if (msg.chatId === chat.id) {
-        setMessages((prev) => [...prev, msg]);
+        setMessages((prev) => [...prev.filter(m => m.id !== msg.id), msg].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 150);
       }
     },
+    onReconnect: () => { void loadData(); },
     onTaskCreated: (task) => {
       if (task.chatId === chat.id && task.sourceMessageId) {
         setMessages((prev) =>
@@ -63,22 +77,26 @@ export const ChatWindowScreen = () => {
   }, [chat.id]);
 
   const loadData = useCallback(async () => {
+    const version = ++requestVersion.current;
     try {
       const [msgData, contactData] = await Promise.all([
         chatsApi.getMessages(chat.id, 1, 80),
         chatsApi.getChatContacts(chat.id).catch(() => []),
       ]);
-      setMessages(msgData.messages);
+      if (version !== requestVersion.current) return;
+      setMessages(prev => [...new Map([...prev, ...msgData.messages].map(m => [m.id, m])).values()].sort((a,b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)));
       setContacts(contactData);
     } catch (err) {
       console.error('Failed to load chat data:', err);
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [chat.id]);
 
   useEffect(() => {
-    loadData();
+    setMessages([]); setContacts([]); pendingMessage.current = null; isInitialScrollDone.current = false;
+    void loadData();
+    return () => { requestVersion.current++; };
   }, [loadData]);
 
   // Only scroll to bottom once when messages initially load
@@ -91,10 +109,15 @@ export const ChatWindowScreen = () => {
     }
   }, [loading, messages.length]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputText.trim()) return;
-    sendMessage(chat.id, inputText.trim());
-    setInputText('');
+    const text = inputText.trim();
+    if (!pendingMessage.current || pendingMessage.current.text !== text) pendingMessage.current = { id: Date.now() + '_' + Math.random().toString(36).slice(2), text };
+    try {
+      await sendMessage(chat.id, text, pendingMessage.current.id);
+      pendingMessage.current = null;
+      setInputText('');
+    } catch (error: any) { Alert.alert('Mesaj kaydedilemedi', error.message); return; }
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 200);
   };
 
@@ -106,10 +129,11 @@ export const ChatWindowScreen = () => {
   const handleCreateTaskSubmit = async (data: CreateTaskRequest) => {
     try {
       await tasksApi.createTask(data);
-      Alert.alert('Başarılı', 'Görev oluşturuldu ve WhatsApp bildirimi iletildi.');
-      loadData();
+      Alert.alert('Kaydedildi', 'Görev kaydedildi; bildirim durumu Bildirimler ekranında görülebilir.');
+      void loadData();
     } catch (err: any) {
       Alert.alert('Hata', err.response?.data?.error || err.message || 'Görev oluşturulamadı');
+      throw err;
     }
   };
 
@@ -145,6 +169,8 @@ export const ChatWindowScreen = () => {
         ) : (
           <FlatList
             ref={flatListRef}
+          onViewableItemsChanged={onVisible}
+          viewabilityConfig={{itemVisiblePercentThreshold:25}}
             data={messages}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (

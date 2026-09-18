@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { X, Search, MessageSquareText } from 'lucide-react';
+import { newClientId } from '../../lib/client-id';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface CreateTaskModalProps {
 }
 
 export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage, contacts, onTaskCreated }: CreateTaskModalProps) {
+  const requestId = useRef<string | undefined>(undefined);
   const [title, setTitle] = useState(sourceMessage?.body?.substring(0, 60) || '');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
@@ -29,6 +31,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    requestId.current ||= newClientId();
     setLoading(true);
     try {
       const res = await fetch('/api/tasks', {
@@ -38,6 +41,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
           Authorization: `Bearer ${localStorage.getItem('mywa_token')}`
         },
         body: JSON.stringify({
+          clientRequestId: requestId.current,
           chatId,
           sourceMessageId: sourceMessage?.id,
           sourceMessageBody: sourceMessage?.body || null,
@@ -50,11 +54,13 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
         })
       });
       if (res.ok) {
+        requestId.current = undefined;
+        alert('Görev kaydedildi. Bildirim durumunu Bildirimler bölümünden takip edebilirsiniz.');
         if (onTaskCreated) onTaskCreated();
         onClose();
-      }
+      } else { const data = await res.json(); alert(data.error || 'Görev kaydedilemedi'); }
     } catch (err) {
-      console.error('Failed to create task:', err);
+      alert('Görev kaydı doğrulanamadı; aynı işlemle tekrar deneyebilirsiniz.');
     } finally {
       setLoading(false);
     }
@@ -75,10 +81,10 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="w-full max-w-md rounded-lg bg-[#2A3942] border border-[#222E35] flex flex-col my-auto max-h-[90vh]">
-        <div className="flex items-center justify-between border-b border-[#222E35] p-4">
-          <h2 className="text-lg font-medium text-[#E9EDEF]">📋 Yeni Görev Oluştur</h2>
-          <button onClick={onClose} className="text-[#8696A0] hover:text-[#E9EDEF]">
+      <div className="w-full max-w-md rounded-lg bg-[#e9edef] border border-[#e9edef] flex flex-col my-auto max-h-[90vh]">
+        <div className="flex items-center justify-between border-b border-[#e9edef] p-4">
+          <h2 className="text-lg font-medium text-[#111b21]">📋 Yeni Görev Oluştur</h2>
+          <button onClick={onClose} className="text-[#667781] hover:text-[#111b21]">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -87,13 +93,13 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
           {/* Mesaj Metni - Readonly, tam metin */}
           {sourceMessage && (
             <div className="mb-4">
-              <label className="mb-1 flex items-center gap-1 text-sm text-[#8696A0]">
+              <label className="mb-1 flex items-center gap-1 text-sm text-[#667781]">
                 <MessageSquareText className="h-4 w-4" /> Mesaj Metni
               </label>
-              <div className="rounded-md bg-[#111B21] p-3 text-sm text-[#E9EDEF] border border-[#222E35]">
+              <div className="rounded-md bg-[#ffffff] p-3 text-sm text-[#111b21] border border-[#e9edef]">
                 <div className="flex justify-between items-center mb-2">
                   <span className="font-semibold text-[#00A884] text-xs">{sourceMessage.senderName}</span>
-                  <span className="text-xs text-[#8696A0]">{new Date(sourceMessage.timestamp).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
+                  <span className="text-xs text-[#667781]">{new Date(sourceMessage.timestamp).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
                 </div>
                 <div className="text-[#D1D7DB] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto text-[13px] leading-relaxed">{sourceMessage.body}</div>
               </div>
@@ -102,17 +108,17 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
           <form id="create-task-form" onSubmit={handleSubmit} className="flex flex-col space-y-4">
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Görev Başlığı *</label>
-              <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Görev için kısa başlık..." className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+              <label className="mb-1 block text-sm text-[#667781]">Görev Başlığı *</label>
+              <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Görev için kısa başlık..." className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
             </div>
             
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Açıklama</label>
-              <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Ek notlar..." rows={2} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] resize-none" />
+              <label className="mb-1 block text-sm text-[#667781]">Açıklama</label>
+              <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Ek notlar..." rows={2} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] resize-none" />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Öncelik</label>
+              <label className="mb-1 block text-sm text-[#667781]">Öncelik</label>
               <div className="flex flex-wrap gap-2">
                 {[
                   { value: 'LOW', label: 'Düşük', color: 'text-green-400 bg-green-400/10' },
@@ -129,26 +135,26 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">📅 Bitiş Tarihi</label>
+              <label className="mb-1 block text-sm text-[#667781]">📅 Bitiş Tarihi</label>
               <input 
                 type="date" 
                 value={dueDate} 
                 min={today}
                 onChange={e => setDueDate(e.target.value)} 
-                className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] [color-scheme:dark]" 
+                className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] [color-scheme:dark]" 
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">👥 Görevliler</label>
+              <label className="mb-1 block text-sm text-[#667781]">👥 Görevliler</label>
               <div className="relative mb-2">
-                <Search className="absolute left-2 top-2 h-4 w-4 text-[#8696A0]" />
+                <Search className="absolute left-2 top-2 h-4 w-4 text-[#667781]" />
                 <input 
                   type="text" 
                   placeholder="Kişi ara..." 
                   value={searchContact} 
                   onChange={e => setSearchContact(e.target.value)} 
-                  className="w-full rounded bg-[#111B21] p-2 pl-8 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" 
+                  className="w-full rounded bg-[#ffffff] p-2 pl-8 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" 
                 />
               </div>
               {assigneeIds.length > 0 && (
@@ -164,12 +170,12 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
                   })}
                 </div>
               )}
-              <div className="max-h-[120px] overflow-y-auto rounded bg-[#111B21] border border-[#222E35] p-2 space-y-1">
-                {filteredContacts.length === 0 && <div className="text-xs text-[#8696A0] p-1">Kişi bulunamadı</div>}
+              <div className="max-h-[120px] overflow-y-auto rounded bg-[#ffffff] border border-[#e9edef] p-2 space-y-1">
+                {filteredContacts.length === 0 && <div className="text-xs text-[#667781] p-1">Kişi bulunamadı</div>}
                 {filteredContacts.map(c => (
-                  <label key={c.id} className="flex items-center space-x-2 cursor-pointer p-1 hover:bg-[#202C33] rounded">
+                  <label key={c.id} className="flex items-center space-x-2 cursor-pointer p-1 hover:bg-[#f0f2f5] rounded">
                     <input type="checkbox" checked={assigneeIds.includes(c.id)} onChange={() => toggleAssignee(c.id)} className="accent-[#00A884]" />
-                    <span className="text-sm text-[#E9EDEF]">{c.pushName || c.displayName || c.phoneNumber}</span>
+                    <span className="text-sm text-[#111b21]">{c.pushName || c.displayName || c.phoneNumber}</span>
                   </label>
                 ))}
               </div>
@@ -177,15 +183,15 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
             <label className="flex items-center space-x-2 cursor-pointer pt-2">
               <input type="checkbox" checked={notifyOnCreate} onChange={e => setNotifyOnCreate(e.target.checked)} className="accent-[#00A884] h-4 w-4" />
-              <span className="text-sm text-[#E9EDEF]">WhatsApp'ta bildir</span>
+              <span className="text-sm text-[#111b21]">WhatsApp&apos;ta bildir</span>
             </label>
 
           </form>
         </div>
 
-        <div className="flex justify-end space-x-2 p-4 border-t border-[#222E35]">
-          <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm text-[#8696A0] hover:bg-[#202C33]">İptal</button>
-          <button form="create-task-form" type="submit" disabled={loading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#111B21] hover:bg-[#008f6f] disabled:opacity-50">
+        <div className="flex justify-end space-x-2 p-4 border-t border-[#e9edef]">
+          <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm text-[#667781] hover:bg-[#f0f2f5]">İptal</button>
+          <button form="create-task-form" type="submit" disabled={loading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f] disabled:opacity-50">
             {loading ? 'Oluşturuluyor...' : 'Görev Oluştur 📌'}
           </button>
         </div>

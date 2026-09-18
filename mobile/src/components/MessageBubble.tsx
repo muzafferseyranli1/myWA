@@ -1,8 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, {useEffect,useState} from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
 import { CheckSquare, CornerDownRight } from 'lucide-react-native';
 import { ContactItem, MessageItem } from '../lib/types';
 import { COLORS } from '../lib/constants';
+import {getServerUrl} from '../api/client';
 
 interface MessageBubbleProps {
   message: MessageItem;
@@ -78,7 +79,10 @@ function renderFormattedBody(text: string, contacts: ContactItem[] = []) {
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, contacts = [], onCreateTask }) => {
-  const isFromMe = message.isFromMe;
+  const [base,setBase]=useState(''),[mediaError,setMediaError]=useState(false);
+ useEffect(()=>{void getServerUrl().then(setBase);},[]);
+ const media=message.mediaUrl?(message.mediaUrl.startsWith('/')?base+message.mediaUrl:message.mediaUrl):null;
+ const isFromMe = message.isFromMe;
   const time = new Date(message.timestamp).toLocaleTimeString('tr-TR', {
     hour: '2-digit',
     minute: '2-digit',
@@ -116,13 +120,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, contacts 
         )}
 
         {/* Body */}
-        {message.body ? renderFormattedBody(message.body, contacts) : null}
+        {message.revoked ? <Text style={styles.messageText}>Bu mesaj silindi.</Text> : message.body ? renderFormattedBody(message.body, contacts) : null}
 
         {/* Media indicator if url exists */}
-        {message.mediaUrl && (
-          <View style={styles.mediaContainer}>
-            <Text style={styles.mediaText}>📎 {message.mediaName || 'Medya Eki'}</Text>
-          </View>
+        {media && !message.revoked && (['IMAGE','STICKER'].includes(message.messageType) && !mediaError ?
+         <TouchableOpacity onPress={()=>void Linking.openURL(media)}><Image source={{uri:media}} onError={()=>setMediaError(true)} resizeMode="contain" style={{width:240,height:240,borderRadius:6,marginTop:6}}/></TouchableOpacity> :
+         <TouchableOpacity style={styles.mediaContainer} onPress={()=>{setMediaError(false);void Linking.openURL(media);}}><Text style={styles.mediaText}>{mediaError?'Medya açılamadı. Tekrar dene':message.mediaName || 'Medya ekini aç'}</Text></TouchableOpacity>
         )}
 
         {/* Footer: Time & Task info */}
@@ -175,7 +178,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   bubbleMe: {
-    backgroundColor: '#005c4b', // WA dark green sent
+    backgroundColor: '#d9fdd3', // WA dark green sent
     borderTopRightRadius: 2,
   },
   bubbleOther: {

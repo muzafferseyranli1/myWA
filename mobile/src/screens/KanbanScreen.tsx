@@ -39,6 +39,8 @@ export const KanbanScreen = () => {
   }, [fetchTasks]);
 
   useSocket({
+    onReconnect: () => { void fetchTasks(); },
+    onNotificationUpdated: () => { void fetchTasks(); },
     onTaskCreated: () => fetchTasks(),
     onTaskUpdated: () => fetchTasks(),
     onTaskDeleted: () => fetchTasks(),
@@ -65,8 +67,8 @@ export const KanbanScreen = () => {
             {
               text: 'Tamamla',
               onPress: async () => {
-                await tasksApi.updateTask(task.id, { status: 'DONE' });
-                fetchTasks();
+                try { await tasksApi.updateTask(task.id, { status: 'DONE' }); await fetchTasks(); }
+                catch (err: any) { Alert.alert('Hata', err.response?.data?.error || err.message); }
               },
             },
           ]
@@ -83,7 +85,7 @@ export const KanbanScreen = () => {
   const handleRemind = async (task: TaskItem) => {
     try {
       await tasksApi.sendReminder(task.id);
-      Alert.alert('Hatırlatıldı', `"${task.title}" için WhatsApp hatırlatma mesajı gönderildi.`);
+      Alert.alert('Kaydedildi', `"${task.title}" için hatırlatma kuyruğa eklendi.`);
     } catch (err: any) {
       Alert.alert('Hata', err.response?.data?.error || err.message || 'Hatırlatma gönderilemedi');
     }

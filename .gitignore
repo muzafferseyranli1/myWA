@@ -13,3 +13,8 @@ mobile/android/
 mobile/ios/
 *.apk
 
+
+temp/
+mobile/dist-check/
+
+data/media/

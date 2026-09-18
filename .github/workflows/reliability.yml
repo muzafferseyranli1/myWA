@@ -1,0 +1,36 @@
+name: Reliability
+on: [push, pull_request]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: mywa_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:test-only@127.0.0.1:5432/mywa_test
+      NEXT_TELEMETRY_DISABLED: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run typecheck && npm run lint && npm test
+      - run: npm run test:integration && npm run test:migrations
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:test-only@127.0.0.1:5432/mywa_test
+      - run: npm run build
+      - run: npm ci --prefix mobile
+      - run: npm run typecheck --prefix mobile && npm run build:check --prefix mobile

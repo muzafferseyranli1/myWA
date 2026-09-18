@@ -1,33 +1,29 @@
 import { Router } from 'express';
-import { whatsappService } from '../services/whatsapp.service';
-
+import { wahaService } from '../services/waha.service';
+import { requireAuth, requireAdmin } from '../middleware/auth';
+import { prisma } from '../lib/prisma';
 const router = Router();
-
+router.use(requireAuth);
+router.get('/sync', async (_req, res) => {
+  try { res.json(await prisma.syncState.findUnique({where:{session:process.env.WAHA_SESSION_NAME || 'default'}})); }
+  catch { res.status(503).json({error:'Eşitleme durumu alınamadı.'}); }
+});
+router.post('/sync', requireAdmin, async (_req, res) => {
+  try {
+    await prisma.syncState.upsert({where:{session:process.env.WAHA_SESSION_NAME || 'default'},create:{session:process.env.WAHA_SESSION_NAME || 'default'},update:{completedUntil:0,roundUntil:null,offset:0,lastError:null}});
+    res.json({success:true});
+  } catch { res.status(503).json({error:'Eşitleme başlatılamadı.'}); }
+});
 router.get('/status', (req, res) => {
-  res.json(whatsappService.getStatus());
+  const status = wahaService.getStatus();
+  res.json({ ...status, qr: (req as any).user.role === 'ADMIN' ? status.qr : null });
 });
-
-router.post('/connect', async (req, res) => {
-  try {
-    const current = whatsappService.getStatus().status;
-    if (current === 'disconnected' || req.body?.force) {
-      await whatsappService.resetSession();
-    } else {
-      await whatsappService.initialize();
-    }
-    res.json({ success: true, status: 'connecting' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+router.post('/connect', requireAdmin, async (_req, res) => {
+  try { await wahaService.startSession(); res.json({ success: true, ...wahaService.getStatus() }); }
+  catch { res.status(502).json({ error: 'WAHA bağlantısı kurulamadı; yapılandırma ve erişimi kontrol edin.' }); }
 });
-
-router.post('/disconnect', async (req, res) => {
-  try {
-    await whatsappService.disconnect();
-    res.json({ success: true, status: 'disconnected' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+router.post('/disconnect', requireAdmin, async (_req, res) => {
+  try { await wahaService.stopSession(); res.json({ success: true, status: 'disconnected' }); }
+  catch { res.status(502).json({ error: 'Durdurma tercihi kaydedildi; WAHA erişildiğinde uygulanacak.' }); }
 });
-
 export default router;

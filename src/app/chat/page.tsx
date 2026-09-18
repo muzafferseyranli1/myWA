@@ -1,314 +1,129 @@
 'use client';
-
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ChatList from '../../components/chat/ChatList';
 import ChatWindow from '../../components/chat/ChatWindow';
 import TaskSidebar from '../../components/task/TaskSidebar';
 import KanbanBoard from '../../components/task/KanbanBoard';
 import QRConnectModal from '../../components/whatsapp/QRConnectModal';
+import NotificationsPanel from '../../components/NotificationsPanel';
 import ReminderButton from '../../components/task/ReminderButton';
-import { getSocket } from '../../lib/socket';
-import { LogOut, Smartphone, CheckCircle, Clock } from 'lucide-react';
-
-export default function ChatDashboard() {
-  const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentView, setCurrentView] = useState<'chat' | 'kanban'>('chat');
-  const [chats, setChats] = useState<any[]>([]);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [contacts, setContacts] = useState<any[]>([]);
-  
-  const [waStatus, setWaStatus] = useState<'qr' | 'connecting' | 'authenticated' | 'ready' | 'connected' | 'disconnected'>('disconnected');
-  const [qrCode, setQrCode] = useState<string>('');
-  const [myJid, setMyJid] = useState<string>('');
-  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(true);
-
-  useEffect(() => {
-    const token = localStorage.getItem('mywa_token');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
-
-    fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => {
-        if (!res.ok) throw new Error();
-        setIsAuthenticated(true);
-      })
-      .catch(() => {
-        localStorage.removeItem('mywa_token');
-        router.push('/login');
-      });
-
-    const sock = getSocket();
-    sock.auth = { token };
-    sock.connect();
-
-    const onStatus = (data: any) => {
-      if (typeof data === 'string') {
-        setWaStatus(data as any);
-      } else if (data && typeof data === 'object') {
-        if (data.status) setWaStatus(data.status);
-        if (data.qr) {
-          setQrCode(data.qr);
-          setWaStatus('qr');
-        }
-        if (data.myJid) {
-          setMyJid(data.myJid);
-        }
-      }
-    };
-
-    const onQR = (data: any) => {
-      const qrVal = typeof data === 'string' ? data : data?.qr || data?.qrCode || '';
-      if (qrVal) {
-        setQrCode(qrVal);
-        setWaStatus('qr');
-      }
-    };
-
-    const onNewMsg = (msg: any) => {
-      setMessages(prev => {
-        // Only append if it's the selected chat
-        if (msg.chatId === selectedChatId) {
-          return [...prev, msg];
-        }
-        return prev;
-      });
-    };
-
-    const onTaskCreated = (task: any) => {
-      setTasks(prev => [...prev, task]);
-    };
-
-    const onTaskUpdated = (updatedTask: any) => {
-      setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
-    };
-
-    const onTaskDeleted = (taskId: string) => {
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-    };
-
-    const onChatUpdated = (chatId?: string) => {
-      fetchChats();
-      if (chatId && chatId === selectedChatId) {
-        fetchMessagesAndTasks(chatId);
-      }
-    };
-
-    sock.on('whatsapp_status', onStatus);
-    sock.on('whatsapp_qr', onQR);
-    sock.on('new_message', onNewMsg);
-    sock.on('chat_updated', onChatUpdated);
-    sock.on('task_created', onTaskCreated);
-    sock.on('task_updated', onTaskUpdated);
-    sock.on('task_deleted', onTaskDeleted);
-
-    fetchChats();
-    fetchWaStatus();
-
-    const onFocus = () => {
-      fetchChats();
-      fetchWaStatus();
-      if (selectedChatId) fetchMessagesAndTasks(selectedChatId);
-    };
-    window.addEventListener('focus', onFocus);
-
-    const interval = setInterval(() => {
-      if (selectedChatId) fetchMessagesAndTasks(selectedChatId);
-      fetchChats();
-    }, 10000);
-
-    return () => {
-      sock.off('whatsapp_status', onStatus);
-      sock.off('whatsapp_qr', onQR);
-      sock.off('new_message', onNewMsg);
-      sock.off('chat_updated', onChatUpdated);
-      sock.off('task_created', onTaskCreated);
-      sock.off('task_updated', onTaskUpdated);
-      sock.off('task_deleted', onTaskDeleted);
-      window.removeEventListener('focus', onFocus);
-      clearInterval(interval);
-    };
-  }, [router, selectedChatId]);
-
-  const fetchWaStatus = async () => {
-    try {
-      const res = await fetch('/api/whatsapp/status', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status) setWaStatus(data.status);
-        if (data.qr) {
-          setQrCode(data.qr);
-          setWaStatus('qr');
-        }
-        if (data.myJid) {
-          setMyJid(data.myJid);
-        }
-      }
-    } catch (e) {}
+import { getSocket, disconnectSocket } from '../../lib/socket';
+import { LogOut, Smartphone, MessageCircle, LayoutDashboard, Bell, X, RefreshCw } from 'lucide-react';
+function headers(){return {Authorization:'Bearer '+localStorage.getItem('mywa_token')};}
+function merge(previous:any[],incoming:any[]){return [...new Map([...previous,...incoming].map(m=>[m.id,m])).values()].sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp)||a.id.localeCompare(b.id));}
+export default function ChatDashboard(){
+ const router=useRouter(),activeChat=useRef<string|null>(null),version=useRef(0),chatRef=useRef<any[]>([]),notified=useRef(new Set<string>());
+ const [authenticated,setAuthenticated]=useState(false),[admin,setAdmin]=useState(false),[error,setError]=useState('');
+ const [view,setView]=useState<'chat'|'kanban'>('chat'),[selected,setSelected]=useState<string|null>(null),[chats,setChats]=useState<any[]>([]),[messages,setMessages]=useState<any[]>([]),[tasks,setTasks]=useState<any[]>([]),[contacts,setContacts]=useState<any[]>([]);
+ const [status,setStatus]=useState('disconnected'),[qr,setQr]=useState(''),[myJid,setMyJid]=useState(''),[showQr,setShowQr]=useState(false),[showTasks,setShowTasks]=useState(false),[showNotifications,setShowNotifications]=useState(false);
+ const [socketOnline,setSocketOnline]=useState(false),[sync,setSync]=useState<any>(null),[hasMore,setHasMore]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[notice,setNotice]=useState<any>(null),[notificationHint,setNotificationHint]=useState('');
+ const fetchChats=useCallback(async()=>{
+  try {const res=await fetch('/api/chats',{headers:headers()});if(!res.ok)throw new Error('Sohbetler alınamadı.');const data=await res.json();setChats(data);chatRef.current=data;}catch(e:any){setError(e.message);}
+ },[]);
+ const fetchStatus=useCallback(async()=>{
+  try {const [wa,history]=await Promise.all([fetch('/api/whatsapp/status',{headers:headers()}),fetch('/api/whatsapp/sync',{headers:headers()})]);
+   if(wa.ok){const data=await wa.json();setStatus(data.status);setQr(data.qr||'');if(data.myJid)setMyJid(data.myJid);}
+   if(history.ok)setSync(await history.json());
+  }catch{setStatus('disconnected');}
+ },[]);
+ const fetchContacts=useCallback(async(id:string)=>{try{const res=await fetch('/api/chats/'+encodeURIComponent(id)+'/contacts',{headers:headers()});if(res.ok&&activeChat.current===id)setContacts(await res.json());}catch{}},[]);
+ const fetchData=useCallback(async(id:string)=>{
+  const request=++version.current;
+  try{
+   const [a,b]=await Promise.all([fetch('/api/chats/'+encodeURIComponent(id)+'/messages',{headers:headers()}),fetch('/api/chats/'+encodeURIComponent(id)+'/tasks',{headers:headers()})]);
+   if(!a.ok||!b.ok)throw new Error('Mesajlar veya görevler alınamadı; yeniden denenecek.');
+   const [messageData,taskData]=await Promise.all([a.json(),b.json()]);
+   if(activeChat.current!==id||version.current!==request)return;
+   setMessages(previous=>merge(previous,messageData.messages||messageData));setTasks(taskData);
+   setHasMore(previous=>previous||!!messageData.hasMore);setError('');
+  }catch(e:any){if(activeChat.current===id)setError(e.message);}
+ },[]);
+ const selectChat=useCallback((id:string)=>{
+  const socket=getSocket();if(activeChat.current)socket.emit('leave_chat',activeChat.current);
+  activeChat.current=id;version.current++;setSelected(id);setView('chat');setMessages([]);setTasks([]);setContacts([]);setHasMore(false);setNotice(null);
+  socket.emit('join_chat',id);void fetchData(id);void fetchContacts(id);
+ },[fetchData,fetchContacts]);
+ useEffect(()=>{
+  const token=localStorage.getItem('mywa_token');if(!token){router.push('/login');return;}
+  let closed=false;
+  void fetch('/api/auth/me',{headers:headers()}).then(async res=>{
+   if(res.status===401){disconnectSocket();localStorage.removeItem('mywa_token');router.push('/login');return;}
+   if(!res.ok)throw new Error('Oturum doğrulanamadı. Yeniden deneyin.');
+   const user=await res.json();if(!closed){setAdmin(user.role==='ADMIN');setAuthenticated(true);}
+  }).catch(e=>setError(e.message));
+  const socket=getSocket();socket.auth={token};
+  const refresh=()=>{setSocketOnline(socket.connected);void fetchChats();void fetchStatus();if(activeChat.current){socket.emit('join_chat',activeChat.current);void fetchData(activeChat.current);void fetchContacts(activeChat.current);}};
+  const disconnected=()=>setSocketOnline(false);
+  const onMessage=(m:any)=>{if(m.chatId===activeChat.current)setMessages(prev=>merge(prev,[m]));};
+  const onUpdated=(m:any)=>{if(m.chatId===activeChat.current){setMessages(prev=>prev.map(old=>old.id===m.id?{...old,...m}:old));void fetchData(m.chatId);}};
+  const onChat=()=>void fetchChats();
+  const onTask=()=>{if(activeChat.current)void fetchData(activeChat.current);};
+  const onStatus=(data:any)=>{setStatus(data.status||data);setQr(data.qr||'');if(data.myJid)setMyJid(data.myJid);};
+  const onArrived=(m:any)=>{
+   if(m.isFromMe||notified.current.has(m.id)||Date.now()-Date.parse(m.timestamp)>300000)return;
+   notified.current.add(m.id);
+   if(activeChat.current===m.chatId&&document.visibilityState==='visible'&&document.hasFocus())return;
+   const title=chatRef.current.find(c=>c.id===m.chatId)?.name||'Yeni WhatsApp mesajı';
+   setNotice({...m,title});
+   if('Notification' in window&&Notification.permission==='granted'){
+    const notification=new Notification(title,{body:m.body||'Yeni medya iletisi',tag:m.id});
+    notification.onclick=()=>{window.focus();selectChat(m.chatId);notification.close();};
+   }
   };
-
-  const fetchChats = async () => {
-    try {
-      const res = await fetch('/api/chats', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
-      });
-      if (res.ok) setChats(await res.json());
-    } catch (e) {}
-  };
-
-  const fetchContacts = async (chatId: string) => {
-    try {
-      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/contacts`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
-      });
-      if (res.ok) setContacts(await res.json());
-    } catch (e) {
-      console.error('fetchContacts error:', e);
-    }
-  };
-
-  const fetchMessagesAndTasks = async (chatId: string) => {
-    try {
-      const [msgRes, taskRes] = await Promise.all([
-        fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
-        }),
-        fetch(`/api/chats/${encodeURIComponent(chatId)}/tasks`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}` }
-        })
-      ]);
-      
-      if (msgRes.ok) {
-        const msgData = await msgRes.json();
-        setMessages(Array.isArray(msgData) ? msgData : msgData.messages || []);
-      }
-      if (taskRes.ok) {
-        const taskData = await taskRes.json();
-        setTasks(Array.isArray(taskData) ? taskData : []);
-      }
-    } catch (e) {
-      console.error('fetchMessagesAndTasks error:', e);
-    }
-  };
-
-  const handleSelectChat = (chatId: string) => {
-    const sock = getSocket();
-    if (selectedChatId) {
-      sock.emit('leave_chat', selectedChatId);
-    }
-    setSelectedChatId(chatId);
-    sock.emit('join_chat', chatId);
-    fetchMessagesAndTasks(chatId);
-    fetchContacts(chatId);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('mywa_token');
-    router.push('/login');
-  };
-
-  if (!isAuthenticated) return null;
-
-  return (
-    <div className="flex h-screen flex-col bg-[#111B21] text-[#E9EDEF]">
-      {/* Header Bar */}
-      <header className="flex h-16 items-center justify-between border-b border-[#222E35] bg-[#202C33] px-4">
-        <div className="flex items-center space-x-6">
-          <h1 className="text-xl font-bold text-[#E9EDEF]">MyWA</h1>
-          
-          <div className="flex rounded-md bg-[#111B21] p-1">
-            <button
-              onClick={() => setCurrentView('chat')}
-              className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${currentView === 'chat' ? 'bg-[#2A3942] text-[#00A884]' : 'text-[#8696A0] hover:text-[#E9EDEF]'}`}
-            >
-              Sohbet
-            </button>
-            <button
-              onClick={() => setCurrentView('kanban')}
-              className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${currentView === 'kanban' ? 'bg-[#2A3942] text-[#00A884]' : 'text-[#8696A0] hover:text-[#E9EDEF]'}`}
-            >
-              Kanban
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-4">
-          <ReminderButton type="overdue" />
-          <ReminderButton type="summary" />
-          
-          <button 
-            onClick={() => setIsQrModalOpen(true)}
-            className="flex items-center space-x-2 rounded-md border border-[#222E35] bg-[#2A3942] px-3 py-1.5 hover:bg-[#374151]"
-          >
-            <div className={`h-2.5 w-2.5 rounded-full ${waStatus === 'ready' || waStatus === 'connected' ? 'bg-green-500' : waStatus === 'connecting' || waStatus === 'qr' || waStatus === 'authenticated' ? 'bg-yellow-500' : 'bg-red-500'}`} />
-            <Smartphone className="h-4 w-4 text-[#8696A0]" />
-            <span className="text-sm font-medium text-[#E9EDEF]">
-              {waStatus === 'ready' || waStatus === 'connected' ? 'Bağlandı' : waStatus === 'disconnected' ? 'Bağlan' : 'Bağlanıyor...'}
-            </span>
-          </button>
-          
-          <button onClick={handleLogout} className="text-[#8696A0] hover:text-[#E9EDEF]">
-            <LogOut className="h-5 w-5" />
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {currentView === 'chat' ? (
-          <>
-            <div className="w-[320px] flex-shrink-0 border-r border-[#222E35] bg-[#111B21]">
-              <ChatList chats={chats} selectedChatId={selectedChatId} onSelectChat={handleSelectChat} myJid={myJid} />
-            </div>
-            
-            <div className="flex-1 bg-[url('/chat-bg.png')] bg-repeat bg-[#0B141A]">
-              {selectedChatId ? (
-                <ChatWindow 
-                  chatId={selectedChatId} 
-                  chatName={chats.find(c => c.id === selectedChatId)?.name}
-                  messages={messages} 
-                  contacts={contacts}
-                  myJid={myJid}
-                />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center bg-[#222E35]">
-                  <div className="rounded-full bg-[#2A3942] p-4 text-[#00A884]">
-                    <CheckCircle className="h-12 w-12" />
-                  </div>
-                  <p className="mt-4 text-[#8696A0]">Görüntülemek için bir sohbet seçin</p>
-                </div>
-              )}
-            </div>
-
-            {isTaskSidebarOpen && selectedChatId && (
-              <div className="w-[350px] flex-shrink-0 border-l border-[#222E35] bg-[#111B21]">
-                <TaskSidebar chatId={selectedChatId} tasks={tasks} contacts={contacts} onRefresh={() => fetchMessagesAndTasks(selectedChatId)} />
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="flex-1 overflow-auto bg-[#111B21]">
-            <KanbanBoard />
-          </div>
-        )}
-      </div>
-
-      <QRConnectModal 
-        isOpen={isQrModalOpen} 
-        onClose={() => setIsQrModalOpen(false)} 
-        qrCode={qrCode} 
-        status={waStatus} 
-      />
-    </div>
-  );
+  socket.on('connect',refresh);socket.on('disconnect',disconnected);socket.on('new_message',onMessage);socket.on('message_updated',onUpdated);socket.on('message_arrived',onArrived);socket.on('chat_updated',onChat);socket.on('notification_updated',onTask);socket.on('task_created',onTask);socket.on('task_updated',onTask);socket.on('task_deleted',onTask);socket.on('whatsapp_status',onStatus);
+  socket.connect();refresh();
+  const focus=()=>refresh();window.addEventListener('focus',focus);
+  const interval=setInterval(()=>{void fetchChats();void fetchStatus();if(activeChat.current)void fetchData(activeChat.current);},10000);
+  return ()=>{closed=true;clearInterval(interval);window.removeEventListener('focus',focus);socket.off('connect',refresh);socket.off('disconnect',disconnected);socket.off('new_message',onMessage);socket.off('message_updated',onUpdated);socket.off('message_arrived',onArrived);socket.off('chat_updated',onChat);socket.off('notification_updated',onTask);socket.off('task_created',onTask);socket.off('task_updated',onTask);socket.off('task_deleted',onTask);socket.off('whatsapp_status',onStatus);};
+ },[router,fetchChats,fetchStatus,fetchData,fetchContacts,selectChat]);
+ useEffect(()=>{const count=chats.reduce((sum,c)=>sum+(c.unreadCount||0),0);document.title=(count?'('+count+') ':'')+'MyWA';},[chats]);
+ const read=useCallback(async(ids:string[])=>{
+  const id=activeChat.current;if(!id)return false;
+  try{const res=await fetch('/api/chats/'+encodeURIComponent(id)+'/read',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({messageIds:ids})});if(res.ok)void fetchChats();return res.ok;}catch{return false;}
+ },[fetchChats]);
+ const older=async()=>{
+  const id=activeChat.current,before=messages[0]?.id,request=version.current;if(!id||!before||loadingOlder)return;
+  setLoadingOlder(true);
+  try{
+   const res=await fetch('/api/chats/'+encodeURIComponent(id)+'/messages?before='+encodeURIComponent(before),{headers:headers()});if(!res.ok)throw new Error('Önceki mesajlar alınamadı.');
+   const data=await res.json();if(activeChat.current===id&&request===version.current){setMessages(prev=>merge(prev,data.messages));setHasMore(data.hasMore);}
+  }catch(e:any){setError(e.message);}finally{setLoadingOlder(false);}
+ };
+ const enableNotifications=async()=>{
+  if(!('Notification' in window)||!window.isSecureContext){setNotificationHint('Masaüstü bildirimleri için paneli HTTPS üzerinden açın. Okunmamış sayıları panelde gösterilmeye devam eder.');return;}
+  const permission=await Notification.requestPermission();setNotificationHint(permission==='granted'?'Masaüstü bildirimleri açık.':'Tarayıcı bildirim izni vermedi; site izinlerini kontrol edin.');
+ };
+ const resync=async()=>{try{const res=await fetch('/api/whatsapp/sync',{method:'POST',headers:headers()});if(!res.ok)throw new Error();void fetchStatus();}catch{setError('Geçmiş eşitlemesi başlatılamadı.');}};
+ const currentChat=chats.find(c=>c.id===selected),connected=['connected','ready'].includes(status);
+ if(!authenticated)return <div className="p-8 text-[#111b21]">{error||'Yükleniyor…'}{error&&<button className="ml-3 underline" onClick={()=>window.location.reload()}>Yeniden dene</button>}</div>;
+ return <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white text-[#111b21]">
+  <header className="flex min-h-[48px] shrink-0 items-center justify-between gap-3 border-b border-[#e9edef] bg-[#f7f8fa] px-4">
+   <span className="text-[16px] font-bold text-[#008069]">MyWA</span>
+   <div className="flex items-center gap-2">
+    <div className="hidden xl:flex"><ReminderButton type="overdue"/><ReminderButton type="summary"/></div>
+    <button title="Gönderim durumları" onClick={()=>setShowNotifications(true)} className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-[#e9edef]">Gönderimler</button>
+    <button disabled={!admin} onClick={()=>setShowQr(true)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-[#54656f]" title="WhatsApp bağlantısı"><span className={'h-2 w-2 rounded-full '+(connected?'bg-[#25d366]':'bg-amber-500')}/><Smartphone size={17}/><span className="hidden sm:inline">{connected?'WhatsApp bağlı':status==='disconnected'?'WhatsApp bağlantısı yok':'WhatsApp bağlanıyor'}</span></button>
+   </div>
+  </header>
+  {(!socketOnline||!connected||error||sync?.lastError||notificationHint)&&<div role="status" className="flex flex-wrap items-center gap-3 border-b border-[#edd8a3] bg-[#fff7dd] px-4 py-2 text-[13px] text-[#66542c]">{!socketOnline?'Panel bağlantısı kesildi; yeniden bağlanılıyor. ':!connected?'WhatsApp çevrimdışı. Gönderimler kuyrukta bekliyor. ':''}{error||sync?.lastError||notificationHint}{sync?.lastError&&admin&&<button onClick={()=>void resync()} className="flex items-center gap-1 underline"><RefreshCw size={14}/>Geçmişi tekrar tara</button>}<button onClick={()=>{setError('');setNotificationHint('');}} aria-label="Uyarıyı kapat" className="ml-auto"><X size={16}/></button></div>}
+  <div className="flex min-h-0 flex-1">
+   <nav className="hidden w-[64px] shrink-0 flex-col items-center gap-5 border-r border-[#e9edef] bg-[#f0f2f5] py-5 sm:flex">
+    <button onClick={()=>setView('chat')} title="Sohbetler" aria-label="Sohbetler" className={'rounded-full p-3 '+(view==='chat'?'bg-[#d9fdd3] text-[#008069]':'text-[#54656f]')}><MessageCircle size={23}/></button>
+    <button onClick={()=>setView('kanban')} title="Kanban" aria-label="Kanban" className={'rounded-full p-3 '+(view==='kanban'?'bg-[#d9fdd3] text-[#008069]':'text-[#54656f]')}><LayoutDashboard size={23}/></button>
+    <button onClick={()=>void enableNotifications()} title="Masaüstü bildirimlerini aç" aria-label="Masaüstü bildirimlerini aç" className="rounded-full p-3 text-[#54656f] hover:bg-[#e9edef]"><Bell size={23}/></button>
+    <button onClick={()=>{disconnectSocket();localStorage.removeItem('mywa_token');router.push('/login');}} title="Çıkış" aria-label="Çıkış" className="mt-auto p-3 text-[#54656f]"><LogOut size={23}/></button>
+   </nav>
+   {view==='chat'?<>
+    <aside className={'shrink-0 border-r border-[#e9edef] md:block md:w-[340px] lg:w-[380px] xl:w-[420px] '+(selected?'hidden':'w-full')}><ChatList chats={chats} selectedChatId={selected} onSelectChat={selectChat} myJid={myJid}/></aside>
+    <main className={'relative min-w-0 flex-1 '+(!selected?'hidden md:block':'')}>
+     {selected?<ChatWindow key={selected} chatId={selected} chatName={currentChat?.name} avatarUrl={currentChat?.avatarUrl} messages={messages} contacts={contacts} myJid={myJid} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={older} onRead={read} tasksOpen={showTasks} taskCount={tasks.filter(t=>t.status!=='DONE').length} onToggleTasks={()=>setShowTasks(!showTasks)} onBack={()=>{activeChat.current=null;setSelected(null);}}/>:<div className="flex h-full flex-col items-center justify-center bg-[#f7f8fa] px-10 text-center"><MessageCircle size={64} strokeWidth={1} className="text-[#00a884]"/><h2 className="mt-6 text-[28px] font-light">MyWA</h2><p className="mt-3 max-w-sm text-[14px] leading-6 text-[#667781]">Sohbetlerinizi ve görevlerinizi tek panelden takip edin.<br/>Başlamak için bir sohbet seçin.</p>{sync?.roundUntil&&<p className="mt-5 text-xs text-[#667781]">WhatsApp geçmişi eşitleniyor…</p>}</div>}
+     {notice&&<button onClick={()=>selectChat(notice.chatId)} className="absolute right-5 top-5 z-20 max-w-xs rounded-xl border border-[#d9fdd3] bg-white p-4 text-left shadow-lg"><p className="text-sm font-semibold text-[#008069]">{notice.title}</p><p className="mt-1 line-clamp-2 text-[13px] text-[#667781]">{notice.body||'Yeni medya iletisi'}</p></button>}
+    </main>
+    {showTasks&&selected&&<aside className="absolute bottom-0 right-0 top-12 z-30 w-[350px] border-l border-[#e9edef] bg-white shadow-xl xl:static xl:shadow-none"><button className="absolute right-3 top-[-3px] z-10 rounded-full bg-white p-1 text-[#54656f]" onClick={()=>setShowTasks(false)} aria-label="Görev panelini kapat"><X size={17}/></button><TaskSidebar chatId={selected} tasks={tasks} contacts={contacts} onRefresh={()=>void fetchData(selected)}/></aside>}
+   </>:<main className="min-w-0 flex-1 overflow-auto bg-[#f7f8fa]"><KanbanBoard/></main>}
+  </div>
+  {showNotifications&&<NotificationsPanel onClose={()=>setShowNotifications(false)}/>}
+  {admin&&<QRConnectModal isOpen={showQr} onClose={()=>setShowQr(false)} qrCode={qr} status={status}/>}
+ </div>;
 }

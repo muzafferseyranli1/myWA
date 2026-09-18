@@ -14,7 +14,7 @@ export function getSocket(): TypedSocket {
       autoConnect: false,
       auth: { token },
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
     }) as TypedSocket;
   }

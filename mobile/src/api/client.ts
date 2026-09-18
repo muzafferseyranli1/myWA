@@ -37,9 +37,7 @@ apiClient.interceptors.request.use(async (config) => {
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    if (customBaseUrl) {
-      config.baseURL = customBaseUrl;
-    }
+    config.baseURL = await getServerUrl();
   } catch (err) {
     console.warn('Error reading token from SecureStore:', err);
   }

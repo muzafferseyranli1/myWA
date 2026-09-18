@@ -1,11 +1,8 @@
-// ─── Shared TypeScript Types ─────────────────────────
+// ─── Shared Types for myWA Mobile ─────────────────────────
 
-// Task status & priority enums (mirrors Prisma)
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'SYSTEM';
-
-// ─── API Response Types ──────────────────────────────
 
 export interface ChatItem {
   id: string;
@@ -24,17 +21,23 @@ export interface ChatItem {
 
 export interface ContactItem {
   id: string;
-  phoneNumber: string;
-  pushName: string | null;
-  displayName: string | null;
-  avatarUrl: string | null;
+  lidId?: string | null;
+  phoneNumber?: string;
+  pushName?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  mappedJid?: string | null;
+  role?: string;
 }
 
 export interface MessageItem {
+  ack?:number|null; revoked?:boolean; editedAt?:string|null; reactions?:{senderId:string;text:string}[];
   id: string;
   chatId: string;
   senderId: string | null;
   body: string | null;
+  quotedText?: string | null;
+  quotedSender?: string | null;
   messageType: MessageType;
   mediaUrl: string | null;
   mediaName: string | null;
@@ -46,6 +49,7 @@ export interface MessageItem {
 }
 
 export interface TaskItem {
+  notification?: NotificationItem | null;
   id: string;
   chatId: string;
   sourceMessageId: string | null;
@@ -55,11 +59,15 @@ export interface TaskItem {
   priority: TaskPriority;
   dueDate: string | null;
   createdBy: string | null;
+  completionNote?: string | null;
+  completedAt?: string | null;
+  completedBy?: string | null;
   createdAt: string;
   updatedAt: string;
   chat?: ChatItem;
   creator?: ContactItem | null;
   assignees: TaskAssigneeItem[];
+  sourceMessage?: MessageItem | null;
 }
 
 export interface TaskAssigneeItem {
@@ -69,23 +77,17 @@ export interface TaskAssigneeItem {
   contact: ContactItem;
 }
 
-export interface TaskReminderItem {
-  id: string;
-  taskId: string;
-  sentAt: string;
-  messageContent: string;
-}
-
-// ─── API Request Types ───────────────────────────────
-
 export interface CreateTaskRequest {
+  clientRequestId?: string;
   chatId: string;
   sourceMessageId?: string;
+  sourceMessageBody?: string;
   title: string;
   description?: string;
   priority?: TaskPriority;
   dueDate?: string;
   assigneeIds?: string[];
+  notifyOnCreate?: boolean;
 }
 
 export interface UpdateTaskRequest {
@@ -97,72 +99,57 @@ export interface UpdateTaskRequest {
   assigneeIds?: string[];
 }
 
-export interface SendReminderRequest {
-  taskIds?: string[];
-  scope?: 'overdue' | 'due_soon' | 'all_pending' | 'selected';
-  chatId?: string;
-}
-
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  token: string;
-  user: {
-    id: string;
-    username: string;
-    displayName: string;
-    role: string;
-  };
-}
-
-// ─── Kanban Types ────────────────────────────────────
-
-export interface KanbanColumn {
-  id: TaskStatus;
-  title: string;
-  tasks: TaskItem[];
+export interface KanbanStats {
+  total: number;
+  todo: number;
+  inProgress: number;
+  done: number;
+  overdue: number;
 }
 
 export interface KanbanData {
-  columns: KanbanColumn[];
-  stats: {
-    total: number;
-    todo: number;
-    inProgress: number;
-    done: number;
-    overdue: number;
-  };
+  tasks: TaskItem[];
+  stats: KanbanStats;
 }
 
-// ─── WhatsApp Connection Types ───────────────────────
+export interface WAStatus {
+  status: 'disconnected' | 'connecting' | 'qr' | 'connected';
+  qr: string | null;
+}
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  displayName: string;
+  role: string;
+}
+
+export type DeliveryStatus = 'PENDING' | 'PROCESSING' | 'ACCEPTED' | 'FAILED' | 'UNKNOWN' | 'CANCELLED';
+export interface NotificationItem {
+  id: string; taskId: string | null; chatId: string; kind: string; status: DeliveryStatus;
+  attempts: number; lastError: string | null; createdAt: string; updatedAt: string;
+}
+export const deliveryLabels: Record<DeliveryStatus, string> = {
+  PENDING: 'Bildirim bekliyor', PROCESSING: 'Gönderiliyor', ACCEPTED: 'WAHA kabul etti',
+  FAILED: 'Gönderim başarısız', UNKNOWN: 'Gönderim sonucu belirsiz', CANCELLED: 'İptal edildi',
+};
 
 export type WAConnectionStatus = 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready' | 'connected';
-
-export interface WAStatusEvent {
-  status: WAConnectionStatus;
-  qrCode?: string;
-  message?: string;
-}
-
-// ─── Socket.io Event Types ───────────────────────────
-
+export interface WAStatusEvent { status: WAConnectionStatus; qr?: string | null; myJid?: string | null; }
 export interface ServerToClientEvents {
   new_message: (message: MessageItem) => void;
+  message_updated: (message: Partial<MessageItem> & {id:string;chatId:string}) => void;
+  message_arrived: (message: Partial<MessageItem> & {id:string;chatId:string}) => void;
   task_created: (task: TaskItem) => void;
   task_updated: (task: TaskItem) => void;
   task_deleted: (taskId: string) => void;
-  message_task_linked: (data: { messageId: string; task: TaskItem }) => void;
   whatsapp_status: (status: WAStatusEvent) => void;
-  whatsapp_qr: (qrDataUrl: string) => void;
-  reminder_sent: (data: { count: number; tasks: string[] }) => void;
+  whatsapp_qr: (qr: string) => void;
   chat_updated: (chatId?: string) => void;
+  notification_updated: (notification: NotificationItem) => void;
 }
-
 export interface ClientToServerEvents {
   join_chat: (chatId: string) => void;
   leave_chat: (chatId: string) => void;
-  send_message: (data: { chatId: string; body: string }) => void;
+  send_message: (data: { chatId: string; body?: string; text?: string; clientMessageId?: string }, ack: (result: { success: boolean; notification?: NotificationItem; error?: string }) => void) => void;
 }

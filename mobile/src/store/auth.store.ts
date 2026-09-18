@@ -31,8 +31,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       const user = await authApi.getMe();
       set({ token: storedToken, user, isLoading: false });
     } catch (err: any) {
-      await SecureStore.deleteItemAsync('auth_token');
-      set({ token: null, user: null, isLoading: false });
+      if (err.response?.status === 401 || err.response?.status === 404) {
+        await SecureStore.deleteItemAsync('auth_token');
+        set({ token: null, user: null, isLoading: false });
+      } else {
+        const token = await SecureStore.getItemAsync('auth_token');
+        set({ token, user: null, isLoading: false, error: 'Sunucuya erişilemiyor; oturum korunuyor.' });
+      }
     }
   },
 

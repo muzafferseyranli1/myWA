@@ -1,34 +1,14 @@
 import { prisma } from '../src/lib/prisma';
 import bcrypt from 'bcryptjs';
-
 async function main() {
-  const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-  const hashedPassword = await bcrypt.hash(adminPassword, 10);
-
-  const admin = await prisma.user.upsert({
-    where: { username: adminUsername },
-    update: {
-      passwordHash: hashedPassword,
-      role: 'ADMIN',
-      displayName: 'System Admin'
-    },
-    create: {
-      username: adminUsername,
-      passwordHash: hashedPassword,
-      role: 'ADMIN',
-      displayName: 'System Admin'
-    }
-  });
-
-  console.log(`Admin user seeded: ${admin.username}`);
+  if (await prisma.user.findFirst({ where: { role: 'ADMIN' } })) return;
+  const username = process.env.ADMIN_USERNAME || 'admin';
+  const password = process.env.ADMIN_PASSWORD;
+  if (!password) throw new Error('ADMIN_PASSWORD is required to create the first administrator');
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) throw new Error('ADMIN_USERNAME belongs to a non-admin account; choose a different username');
+  const passwordHash = await bcrypt.hash(password, 10);
+  await prisma.user.create({data:{username,passwordHash,role:'ADMIN',displayName:'System Admin'}});
+  console.log('First administrator created');
 }
-
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch(() => { console.error('Administrator initialization failed'); process.exitCode=1; }).finally(() => prisma.$disconnect());

@@ -1,34 +1,15 @@
-FROM node:20-alpine
-
+FROM node:22-alpine
 RUN apk add --no-cache openssl libc6-compat
-
 WORKDIR /app
-
-# Disable telemetry and set build environment
 ENV NEXT_TELEMETRY_DISABLED=1
-# Dummy DATABASE_URL for prisma generate (build-time only, not used at runtime)
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-
-# Copy package manifests
-COPY package.json package-lock.json* ./
-
-# Install ALL dependencies including build tools
-RUN npm install --include=dev
-
-# Copy all source files
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
 COPY . .
-
-# Generate Prisma client and build Next.js app
-RUN npx prisma generate
-RUN npm run build
-
-# Runtime configuration
+RUN npm run db:generate && npm run typecheck && npm test && npm run build
 ENV NODE_ENV=production
 ENV PORT=3060
-
-# Ensure runtime directories exist
 RUN mkdir -p /app/public/uploads
-
 EXPOSE 3060
-
-CMD ["npx", "tsx", "server/index.ts"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["sh", "scripts/entrypoint.sh"]

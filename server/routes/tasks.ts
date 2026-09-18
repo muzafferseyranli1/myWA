@@ -100,7 +100,7 @@ router.post('/:id/close', optionalAuth, async (req: any, res) => {
     const taskId = String(req.params.id);
     const { completionNote, completedBy } = req.body;
 
-    if (!completionNote || !completionNote.trim()) {
+    if (typeof completionNote !== 'string' || !completionNote.trim() || completionNote.length > 20000) {
       return res.status(400).json({ error: 'Görev bitirme notu zorunludur' });
     }
 

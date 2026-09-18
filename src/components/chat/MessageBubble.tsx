@@ -1,228 +1,53 @@
 'use client';
-
+import { useState } from 'react';
+import { FileText, Check, CheckCheck, Clock, Pin, RefreshCw, ExternalLink } from 'lucide-react';
 import { cn, formatTime } from '../../lib/utils';
-import { FileText, Image as ImageIcon, Play, CheckCheck, CornerDownRight, Pin } from 'lucide-react';
-import { useState, JSX } from 'react';
-
-function resolveNameFromContacts(identifier: string, contacts: any[] = []): string | null {
-  if (!identifier) return null;
-  const clean = identifier.trim().replace(/^@/, '');
-  const rawId = clean.split('@')[0];
-  
-  const found = contacts.find(c => {
-    const cId = c.id ? c.id.split('@')[0] : '';
-    const cPhone = c.phoneNumber ? c.phoneNumber.split('@')[0] : '';
-    const cLid = c.lidId ? c.lidId.split('@')[0] : '';
-    const cMapped = c.mappedJid ? c.mappedJid.split('@')[0] : '';
-    return cId === rawId || cPhone === rawId || cLid === rawId || cMapped === rawId || c.id === clean || c.phoneNumber === clean;
-  });
-
-  if (found) {
-    const name = found.displayName || found.pushName;
-    if (name) return name;
-
-    // Bağlı başka bir kayıt varsa (örn: LID veya JID) oradaki ismi kontrol et
-    const linked = contacts.find(c => 
-      (c !== found) && 
-      ((found.lidId && (c.id === found.lidId || c.lidId === found.lidId)) ||
-       (found.id && c.lidId === found.id))
-    );
-    if (linked && (linked.displayName || linked.pushName)) {
-      return linked.displayName || linked.pushName;
-    }
-
-    if (found.phoneNumber && found.phoneNumber !== rawId && found.phoneNumber.length <= 13) {
-      return found.phoneNumber;
-    }
-  }
-  return null;
+import { tokenizeMessage } from '../../lib/message-text';
+function nameOf(id:string,contacts:any[]) {
+ const raw=id?.replace(/^@/,'').split('@')[0];
+ const found=contacts.find(c=>[c.id,c.lidId,c.phoneNumber,c.mappedJid].some(value=>value?.split('@')[0]===raw));
+ return found?.displayName || found?.pushName || raw;
 }
-
-function formatMessageBodyWithMentions(text: string, contacts: any[] = []) {
-  if (!text) return null;
-
-  const mentionRegex = /@(\d{9,16})/g;
-  if (!mentionRegex.test(text)) {
-    return text;
-  }
-
-  const parts: (string | JSX.Element)[] = [];
-  let lastIndex = 0;
-  let match;
-  mentionRegex.lastIndex = 0;
-
-  while ((match = mentionRegex.exec(text)) !== null) {
-    const rawNumber = match[1];
-    const resolvedName = resolveNameFromContacts(rawNumber, contacts);
-    
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-
-    if (resolvedName) {
-      parts.push(
-        <span 
-          key={match.index} 
-          className="inline-flex items-center font-semibold text-emerald-400 bg-emerald-950/50 border border-emerald-800/40 px-1.5 py-0.5 rounded text-xs mx-0.5 shadow-sm"
-          title={`@${rawNumber}`}
-        >
-          @{resolvedName}
-        </span>
-      );
-    } else {
-      parts.push(
-        <span key={match.index} className="font-semibold text-emerald-400/90">
-          @{rawNumber}
-        </span>
-      );
-    }
-
-    lastIndex = mentionRegex.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return parts;
+function Body({text,contacts}:{text:string;contacts:any[]}) {
+ return <>{tokenizeMessage(text).map((part,i)=>{
+  if(part.kind==='link') return <a key={i} href={part.text} target="_blank" rel="noopener noreferrer" className="text-[#027eb5] underline decoration-1 underline-offset-2">{part.text}</a>;
+  if(part.kind==='bold') return <strong key={i}>{part.text}</strong>;
+  if(part.kind==='italic') return <em key={i}>{part.text}</em>;
+  if(part.kind==='strike') return <s key={i}>{part.text}</s>;
+  if(part.kind==='code') return <code key={i} className="rounded bg-black/5 px-1 text-[14px]">{part.text}</code>;
+  if(part.kind==='mention') return <span key={i} title={part.text} className="font-semibold text-[#008069]">@{nameOf(part.text,contacts)}</span>;
+  return part.text;
+ })}</>;
 }
-
-export default function MessageBubble({ 
-  message, 
-  isOwn, 
-  onCreateTask,
-  contacts = []
-}: { 
-  message: any, 
-  isOwn: boolean, 
-  onCreateTask: () => void,
-  contacts?: any[]
-}) {
-  const [isHovered, setIsHovered] = useState(false);
-  
-  let senderDisplay = message.senderName || message.sender?.pushName || message.sender?.displayName;
-  if (!senderDisplay && message.senderId) {
-    const resolved = resolveNameFromContacts(message.senderId, contacts);
-    senderDisplay = resolved || (!message.senderId.includes('@g.us') ? message.senderId.split('@')[0] : null);
-  }
-
-  const quotedSenderDisplay = message.quotedSender 
-    ? (resolveNameFromContacts(message.quotedSender, contacts) || message.quotedSender)
-    : 'İleti';
-
-  const renderContent = () => {
-    return (
-      <div className="space-y-1">
-        {/* Quoted Message Box */}
-        {message.quotedText && (
-          <div className={cn(
-            "rounded-md border-l-4 p-2 text-xs mb-1.5 transition-colors",
-            isOwn 
-              ? "border-emerald-300 bg-black/25 text-emerald-100" 
-              : "border-[#00A884] bg-black/35 text-gray-200"
-          )}>
-            <div className="font-semibold text-[11px] text-emerald-400 flex items-center gap-1 mb-0.5">
-              <CornerDownRight className="h-3 w-3 inline" />
-              {quotedSenderDisplay}
-            </div>
-            <p className="line-clamp-2 text-xs italic text-gray-300">{message.quotedText}</p>
-          </div>
-        )}
-
-        {/* Media Rendering */}
-        {message.mediaUrl && (
-          <div className="overflow-hidden rounded">
-            {message.messageType === 'IMAGE' && (
-              <img 
-                src={message.mediaUrl} 
-                alt="Medya" 
-                className="max-h-72 max-w-full rounded object-cover cursor-pointer hover:opacity-95 transition-opacity" 
-              />
-            )}
-            {message.messageType === 'VIDEO' && (
-              <video src={message.mediaUrl} controls className="max-h-72 max-w-full rounded" />
-            )}
-            {message.messageType === 'AUDIO' && (
-              <div className="py-1">
-                <audio src={message.mediaUrl} controls className="h-10 max-w-full" />
-              </div>
-            )}
-            {message.messageType === 'DOCUMENT' && (
-              <a 
-                href={message.mediaUrl} 
-                target="_blank" 
-                rel="noreferrer" 
-                className="flex items-center space-x-2 rounded bg-black/20 p-2.5 text-xs hover:bg-black/30"
-              >
-                <FileText className="h-6 w-6 text-[#00A884]" />
-                <span className="truncate underline font-medium">{message.mediaName || 'Belge İndir'}</span>
-              </a>
-            )}
-          </div>
-        )}
-
-        {/* Text Body with Mention Highlighting */}
-        {message.messageType === 'REACTION' && message.body ? (
-          <div className="italic text-gray-400 text-xs">🫶 {message.body}</div>
-        ) : message.body && message.body.trim().length > 0 ? (
-          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-            {formatMessageBodyWithMentions(message.body, contacts)}
-          </div>
-        ) : !message.mediaUrl && !message.quotedText ? (
-          <div className="italic text-gray-400 text-xs">💬 (WhatsApp iletisi)</div>
-        ) : null}
-      </div>
-    );
-  };
-
-  return (
-    <div
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (!message.task) onCreateTask();
-      }}
-      className={cn(
-        "relative max-w-[75%] rounded-lg px-3.5 py-2 mb-2 text-sm text-[#E9EDEF] shadow-md group",
-        isOwn ? "self-end bg-[#005C4B] rounded-tr-none" : "self-start bg-[#202C33] rounded-tl-none border border-[#222E35]"
-      )}
-    >
-      {/* Pin Button on Hover */}
-      {!message.task && (
-        <button 
-          onClick={onCreateTask}
-          className={cn(
-            "absolute -top-2 rounded-full p-1 bg-[#2A3942] border border-[#222E35] text-[#8696A0] hover:text-[#00A884] transition-opacity shadow-md z-10",
-            isHovered ? "opacity-100" : "opacity-0",
-            isOwn ? "-left-2" : "-right-2"
-          )}
-          title="Görevi Oluştur"
-        >
-          <Pin className="w-3.5 h-3.5" />
-        </button>
-      )}
-
-      {!isOwn && senderDisplay && (
-        <div className="text-xs font-semibold text-emerald-400 mb-1">{senderDisplay}</div>
-      )}
-      
-      {renderContent()}
-      
-      <div className="mt-1 flex items-center justify-end space-x-1 text-[10px] text-gray-400">
-        <span>{formatTime(message.timestamp)}</span>
-        {isOwn && <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" />}
-      </div>
-
-      {message.task && (
-        <div onClick={onCreateTask} className="mt-2 rounded bg-black/30 p-2 text-xs border border-white/10 cursor-pointer hover:bg-black/40 transition-colors">
-          <div className="font-semibold text-[#00A884] mb-1 truncate">📋 {message.task.title}</div>
-          <div className="flex space-x-2">
-            <span className="rounded bg-blue-900/60 px-1.5 py-0.5 text-blue-200 text-[10px]">{message.task.status}</span>
-            <span className="rounded bg-amber-900/60 px-1.5 py-0.5 text-amber-200 text-[10px]">{message.task.priority}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+export default function MessageBubble({message,isOwn,onCreateTask,contacts=[]}:{message:any;isOwn:boolean;onCreateTask:()=>void;contacts?:any[]}) {
+ const [mediaError,setMediaError]=useState(false),[revision,setRevision]=useState(0),[zoom,setZoom]=useState(false);
+ const sender=message.senderName || message.sender?.displayName || message.sender?.pushName || nameOf(message.senderId,contacts);
+ const media=message.mediaUrl && message.mediaUrl+(message.mediaUrl.includes('?')?'&':'?')+'v='+revision;
+ const image=['IMAGE','STICKER'].includes(message.messageType);
+ const reactions=(message.reactions || []).filter((r:any)=>r.text);
+ return <div data-message-id={message.id} data-incoming={isOwn?'false':'true'} className={cn('message-bubble group relative mb-1 max-w-[85%] rounded-lg px-3 py-2 text-[#111b21] shadow-sm sm:max-w-[75%] lg:max-w-[68%]',isOwn?'self-end bg-[#d9fdd3] bubble-out':'self-start bg-white bubble-in')}>
+  {!isOwn && sender && <p className="mb-1 text-[13px] font-semibold text-[#008069]">{sender}</p>}
+  {!message.revoked && message.quotedText && <div className="mb-2 rounded border-l-[3px] border-[#06cf9c] bg-black/[0.04] px-3 py-2">
+   <p className="text-[13px] font-semibold text-[#008069]">{message.quotedSender?nameOf(message.quotedSender,contacts):'İleti'}</p>
+   <p className="line-clamp-2 whitespace-pre-wrap text-[13px] leading-5 text-[#667781]">{message.quotedText}</p>
+  </div>}
+  {message.revoked ? <p className="italic text-[#667781]">Bu mesaj silindi.</p> : <>
+   {media && <div className="mb-1">
+    {mediaError ? <button className="flex items-center gap-2 rounded bg-black/5 p-3 text-sm" onClick={()=>{setMediaError(false);setRevision(v=>v+1);}}><RefreshCw size={16}/> Medya alınamadı. Yeniden dene</button> : image ? <button className="block" onClick={()=>setZoom(true)} aria-label="Fotoğrafı büyüt"><img key={revision} src={media} alt={message.mediaName || 'Fotoğraf'} loading="lazy" onError={()=>setMediaError(true)} className={cn('max-h-[360px] max-w-full rounded object-contain',message.messageType==='STICKER'?'h-40 w-40':'min-w-[200px]')}/></button> : message.messageType==='VIDEO' ? <video key={revision} src={media} controls preload="metadata" onError={()=>setMediaError(true)} className="max-h-[360px] max-w-full rounded"/> : message.messageType==='AUDIO' ? <audio key={revision} src={media} controls preload="metadata" onError={()=>setMediaError(true)} className="max-w-full"/> : <a href={media} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded bg-black/5 p-4"><FileText size={30} className="text-[#667781]"/><span className="break-all text-sm">{message.mediaName || 'Belgeyi aç'}</span><ExternalLink size={16}/></a>}
+   </div>}
+   {message.preview?.url && /^https?:\/\//.test(message.preview.url) && <a href={message.preview.url} target="_blank" rel="noopener noreferrer" className="mb-2 block overflow-hidden rounded-lg bg-black/[0.04]">
+    {message.preview.thumbnail&&<img src={'data:image/jpeg;base64,'+message.preview.thumbnail} alt="" loading="lazy" className="max-h-52 w-full object-cover" onError={e=>{e.currentTarget.style.display='none';}}/>}
+    <div className="p-3"><p className="text-[14px] font-medium">{message.preview.title||message.preview.url}</p><p className="mt-1 line-clamp-2 text-[12px] text-[#667781]">{message.preview.description}</p></div>
+   </a>}
+   {message.body ? <div className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]"><Body text={message.body} contacts={contacts}/></div> : !media && <p className="text-sm italic text-[#667781]">Metin içermeyen WhatsApp iletisi</p>}
+  </>}
+  <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-[#667781]">
+   {message.editedAt && <span>düzenlendi</span>}<span>{formatTime(message.timestamp)}</span>
+   {isOwn && (message.ack>=2?<CheckCheck size={16} className={message.ack>=3?'text-[#53bdeb]':''}/>:message.ack===1?<Check size={16}/>:<Clock size={13}/>)}
+  </div>
+  {!!reactions.length && <div className="mt-1 flex flex-wrap gap-1">{reactions.map((r:any)=><span key={r.senderId} title={nameOf(r.senderId,contacts)} className="rounded-full border border-[#e9edef] bg-white px-2 py-0.5 text-sm">{r.text}</span>)}</div>}
+  <button onClick={onCreateTask} title="Mesajdan görev oluştur" className="absolute right-1 top-1 rounded-full border border-[#e9edef] bg-white p-1.5 text-[#667781] opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus:opacity-100"><Pin size={15}/></button>
+  {message.task && <div className="mt-2 border-t border-black/10 pt-2 text-xs text-[#008069]">Görev: {message.task.title}</div>}
+  {zoom && <div role="dialog" aria-label="Fotoğraf" className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-6" onClick={()=>setZoom(false)}><button className="absolute right-6 top-4 rounded bg-white px-4 py-2 text-black">Kapat</button><img src={media} alt={message.mediaName || 'Fotoğraf'} className="max-h-[85vh] max-w-full object-contain"/></div>}
+ </div>;
 }

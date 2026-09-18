@@ -1,13 +1,13 @@
 export const DEFAULT_API_URL = 'http://188.132.198.144:3060';
 
 export const COLORS = {
-  bgDark: '#0b141a',
-  bgCard: '#111b21',
-  bgSurface: '#202c33',
-  bgInput: '#2a3942',
-  border: '#222d34',
-  textPrimary: '#e9edef',
-  textSecondary: '#8696a0',
+  bgDark: '#efeae2',
+  bgCard: '#ffffff',
+  bgSurface: '#f0f2f5',
+  bgInput: '#f0f2f5',
+  border: '#e1e5e8',
+  textPrimary: '#111b21',
+  textSecondary: '#667781',
   textMuted: '#667781',
   whatsappGreen: '#00a884',
   whatsappGreenDark: '#008069',

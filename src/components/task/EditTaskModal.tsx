@@ -108,10 +108,10 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="w-full max-w-md rounded-lg bg-[#2A3942] border border-[#222E35] flex flex-col my-auto max-h-[90vh]">
-        <div className="flex items-center justify-between border-b border-[#222E35] p-4">
-          <h2 className="text-lg font-medium text-[#E9EDEF]">Görevi Düzenle</h2>
-          <button onClick={onClose} className="text-[#8696A0] hover:text-[#E9EDEF]">
+      <div className="w-full max-w-md rounded-lg bg-[#e9edef] border border-[#e9edef] flex flex-col my-auto max-h-[90vh]">
+        <div className="flex items-center justify-between border-b border-[#e9edef] p-4">
+          <h2 className="text-lg font-medium text-[#111b21]">Görevi Düzenle</h2>
+          <button onClick={onClose} className="text-[#667781] hover:text-[#111b21]">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -124,19 +124,19 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
           )}
           <form id="edit-task-form" onSubmit={handleSubmit} className="flex flex-col space-y-4">
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Başlık</label>
-              <input required value={title} onChange={e => setTitle(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+              <label className="mb-1 block text-sm text-[#667781]">Başlık</label>
+              <input required value={title} onChange={e => setTitle(e.target.value)} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">Açıklama</label>
-              <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[80px]" />
+              <label className="mb-1 block text-sm text-[#667781]">Açıklama</label>
+              <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[80px]" />
             </div>
             
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-1 block text-sm text-[#8696A0]">Durum</label>
-                <select value={status} onChange={handleStatusChange} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
+                <label className="mb-1 block text-sm text-[#667781]">Durum</label>
+                <select value={status} onChange={handleStatusChange} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
                   <option value="TODO">Yapılacak</option>
                   <option value="IN_PROGRESS">Devam Ediyor</option>
                   <option value="DONE">Tamamlandı</option>
@@ -144,8 +144,8 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-[#8696A0]">Öncelik</label>
-                <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
+                <label className="mb-1 block text-sm text-[#667781]">Öncelik</label>
+                <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]">
                   <option value="LOW">Düşük</option>
                   <option value="MEDIUM">Orta</option>
                   <option value="HIGH">Yüksek</option>
@@ -155,7 +155,7 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
             </div>
 
             {status === 'DONE' && (
-              <div className="rounded bg-[#202C33] p-3 border border-[#00A884]/30">
+              <div className="rounded bg-[#f0f2f5] p-3 border border-[#00A884]/30">
                 <label className="mb-1 block text-xs font-semibold text-[#00A884]">
                   📝 Görev Bitirme Notu {task.completedBy && `(${task.completedBy})`}
                 </label>
@@ -163,14 +163,14 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
                   value={completionNote}
                   onChange={e => setCompletionNote(e.target.value)}
                   placeholder="Görev kapatma notu..."
-                  className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[60px]"
+                  className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] min-h-[60px]"
                 />
               </div>
             )}
 
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="text-sm text-[#8696A0]">Bitiş Tarihi</label>
+                <label className="text-sm text-[#667781]">Bitiş Tarihi</label>
                 <button
                   type="button"
                   onClick={copyTaskLink}
@@ -180,27 +180,27 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
                   {copiedLink ? 'Link Kopyalandı!' : 'Mobil Kapatma Linki'}
                 </button>
               </div>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#111B21] p-2 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-[#8696A0]">👥 Görevliler</label>
+              <label className="mb-1 block text-sm text-[#667781]">👥 Görevliler</label>
               <div className="relative mb-2">
-                <Search className="absolute left-2 top-2 h-4 w-4 text-[#8696A0]" />
+                <Search className="absolute left-2 top-2 h-4 w-4 text-[#667781]" />
                 <input 
                   type="text" 
                   placeholder="Kişi ara..." 
                   value={searchContact} 
                   onChange={e => setSearchContact(e.target.value)} 
-                  className="w-full rounded bg-[#111B21] p-2 pl-8 text-sm text-[#E9EDEF] focus:outline-none focus:ring-1 focus:ring-[#00A884]" 
+                  className="w-full rounded bg-[#ffffff] p-2 pl-8 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" 
                 />
               </div>
-              <div className="max-h-[120px] overflow-y-auto rounded bg-[#111B21] border border-[#222E35] p-2 space-y-1">
-                {filteredContacts.length === 0 && <div className="text-xs text-[#8696A0] p-1">Kişi bulunamadı</div>}
+              <div className="max-h-[120px] overflow-y-auto rounded bg-[#ffffff] border border-[#e9edef] p-2 space-y-1">
+                {filteredContacts.length === 0 && <div className="text-xs text-[#667781] p-1">Kişi bulunamadı</div>}
                 {filteredContacts.map(c => (
-                  <label key={c.id} className="flex items-center space-x-2 cursor-pointer p-1 hover:bg-[#202C33] rounded">
+                  <label key={c.id} className="flex items-center space-x-2 cursor-pointer p-1 hover:bg-[#f0f2f5] rounded">
                     <input type="checkbox" checked={assigneeIds.includes(c.id)} onChange={() => toggleAssignee(c.id)} className="accent-[#00A884]" />
-                    <span className="text-sm text-[#E9EDEF]">{c.pushName || c.displayName || c.phoneNumber}</span>
+                    <span className="text-sm text-[#111b21]">{c.pushName || c.displayName || c.phoneNumber}</span>
                   </label>
                 ))}
               </div>
@@ -208,13 +208,13 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
 
           </form>
         </div>
-        <div className="flex justify-between p-4 border-t border-[#222E35]">
+        <div className="flex justify-between p-4 border-t border-[#e9edef]">
           <button type="button" onClick={handleDelete} className="flex items-center text-red-500 hover:text-red-400 text-sm">
             <Trash2 className="w-4 h-4 mr-1" /> Sil
           </button>
           <div className="flex space-x-2">
-            <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm text-[#8696A0] hover:bg-[#202C33]">İptal</button>
-            <button form="edit-task-form" type="submit" disabled={loading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#111B21] hover:bg-[#008f6f] disabled:opacity-50">
+            <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm text-[#667781] hover:bg-[#f0f2f5]">İptal</button>
+            <button form="edit-task-form" type="submit" disabled={loading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f] disabled:opacity-50">
               {loading ? 'Kaydediliyor...' : 'Güncelle'}
             </button>
           </div>

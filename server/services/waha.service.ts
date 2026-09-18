@@ -2,352 +2,140 @@ import qrcode from 'qrcode';
 import { prisma } from '../lib/prisma';
 import { contactResolver } from './contact-resolver.service';
 
-export interface WAHASessionStatus {
-  name: string;
-  status: 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WORKING' | 'FAILED' | string;
-  config?: any;
-  me?: {
-    id: string;
-    pushName?: string;
-  };
+export class WAHAHttpError extends Error {
+  constructor(public status: number) { super(`WAHA HTTP ${status}`); }
 }
-
 export class WAHAService {
-  private static instance: WAHAService;
-  private baseUrl: string;
-  private sessionName: string;
-  private apiKey?: string;
-
-  // Cached state for instant socket response
-  private currentStatus: string = 'disconnected';
+  private baseUrl = (process.env.WAHA_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
+  private sessionName = process.env.WAHA_SESSION_NAME || 'default';
+  private currentStatus = 'disconnected';
   private currentQr: string | null = null;
-
+  private failures = 0;
+  private nextRecoveryAt = 0;
+  private running: Promise<void> | null = null;
   public onQR?: (qr: string) => void;
   public onStatus?: (status: string) => void;
-
-  private constructor() {
-    this.baseUrl = (process.env.WAHA_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
-    this.sessionName = process.env.WAHA_SESSION_NAME || 'default';
-    this.apiKey = process.env.WAHA_API_KEY || undefined;
-  }
-
-  public static getInstance(): WAHAService {
-    if (!WAHAService.instance) {
-      WAHAService.instance = new WAHAService();
-    }
-    return WAHAService.instance;
-  }
-
   private getHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-    if (this.apiKey) {
-      headers['X-Api-Key'] = this.apiKey;
-    }
-    return headers;
+    return { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Api-Key': process.env.WAHA_API_KEY || '' };
   }
-
-  /**
-   * Health check to see if WAHA container is reachable
-   */
-  public async isHealthy(): Promise<boolean> {
+  private async request(url: string, options: RequestInit = {}, timeout = 15000) {
+    const response = await fetch(url, { ...options, headers: { ...this.getHeaders(), ...options.headers }, signal: AbortSignal.timeout(timeout) });
+    if (!response.ok) throw new WAHAHttpError(response.status);
+    return response;
+  }
+  private setStatus(status: string, qr: string | null = null) {
+    const changed = this.currentStatus !== status || this.currentQr !== qr;
+    this.currentStatus = status;
+    this.currentQr = qr;
+    if (changed) this.onStatus?.(status);
+    if (qr) this.onQR?.(qr);
+  }
+  public getStatus() { return { status: this.currentStatus, qr: this.currentQr }; }
+  public isConnected() { return this.currentStatus === 'connected'; }
+  public async isHealthy() {
+    try { await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000); return true; }
+    catch { return false; }
+  }
+  public async ensureSession(): Promise<any> {
+    try { return await (await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000)).json(); }
+    catch (error) {
+      if (!(error instanceof WAHAHttpError) || error.status !== 404) throw error;
+      // Global webhook configuration in Compose is the sole source of truth.
+      return (await this.request(`${this.baseUrl}/api/sessions`, { method: 'POST', body: JSON.stringify({ name: this.sessionName, start: false, config: { noweb: { store: { enabled: true, fullSync: true } } } }) })).json();
+    }
+  }
+  public async updateStatus() {
     try {
-      const res = await fetch(`${this.baseUrl}/health`, {
-        headers: this.getHeaders(),
-        signal: AbortSignal.timeout(3000)
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+      const session = await (await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000)).json();
+      if (session.status === 'WORKING') this.setStatus('connected');
+      else if (session.status === 'SCAN_QR_CODE') this.setStatus('qr', await this.fetchQrCode());
+      else this.setStatus(session.status === 'STARTING' ? 'connecting' : 'disconnected');
+      return this.getStatus();
+    } catch (error) { this.setStatus('disconnected'); throw error; }
   }
-
-  /**
-   * Ensures the session exists in WAHA. If not, creates it.
-   */
-  public async ensureSession(): Promise<WAHASessionStatus | null> {
-    try {
-      // 1. Check if session exists
-      const checkRes = await fetch(`${this.baseUrl}/api/sessions/${this.sessionName}`, {
-        headers: this.getHeaders(),
-        signal: AbortSignal.timeout(5000)
-      });
-
-      if (checkRes.ok) {
-        return (await checkRes.json()) as WAHASessionStatus;
-      }
-
-      // 2. If 404, create new session
-      if (checkRes.status === 404) {
-        console.log(`[WAHA] Session "${this.sessionName}" not found. Creating...`);
-        const webhookUrl = `${process.env.APP_URL || 'http://188.132.198.144:3060'}/api/whatsapp/webhook`;
-        
-        const createRes = await fetch(`${this.baseUrl}/api/sessions`, {
-          method: 'POST',
-          headers: this.getHeaders(),
-          body: JSON.stringify({
-            name: this.sessionName,
-            start: true,
-            config: {
-              webhooks: [
-                {
-                  url: webhookUrl,
-                  events: ['message', 'message.any', 'session.status']
-                }
-              ]
-            }
-          })
-        });
-
-        if (createRes.ok) {
-          return (await createRes.json()) as WAHASessionStatus;
-        }
-      }
-      return null;
-    } catch (err: any) {
-      console.warn('[WAHA] ensureSession error:', err.message);
-      return null;
-    }
-  }
-
-  /**
-   * Fetches latest status and QR from WAHA and updates internal cache
-   */
-  public async updateStatus(): Promise<{ status: string; qr: string | null }> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/sessions/${this.sessionName}`, {
-        headers: this.getHeaders(),
-        signal: AbortSignal.timeout(4000)
-      });
-
-      if (!res.ok) {
-        if (res.status === 404) {
-          this.currentStatus = 'disconnected';
-          this.currentQr = null;
-        }
-        return { status: this.currentStatus, qr: this.currentQr };
-      }
-
-      const sessionData = (await res.json()) as WAHASessionStatus;
-      const wahaStatus = sessionData.status;
-
-      let mappedStatus = 'disconnected';
-      let mappedQr: string | null = null;
-
-      if (wahaStatus === 'WORKING') {
-        mappedStatus = 'connected';
-        mappedQr = null;
-      } else if (wahaStatus === 'SCAN_QR_CODE') {
-        mappedStatus = 'qr';
-        mappedQr = await this.fetchQrCode();
-      } else if (wahaStatus === 'STARTING') {
-        mappedStatus = 'connecting';
-        mappedQr = null;
-      } else {
-        mappedStatus = 'disconnected';
-        mappedQr = null;
-      }
-
-      const statusChanged = this.currentStatus !== mappedStatus;
-      const qrChanged = this.currentQr !== mappedQr;
-
-      this.currentStatus = mappedStatus;
-      this.currentQr = mappedQr;
-
-      if (statusChanged && this.onStatus) {
-        this.onStatus(this.currentStatus);
-      }
-      if (qrChanged && mappedQr && this.onQR) {
-        this.onQR(mappedQr);
-      }
-
-      return { status: this.currentStatus, qr: this.currentQr };
-    } catch (err: any) {
-      this.currentStatus = 'disconnected';
-      this.currentQr = null;
-      return { status: this.currentStatus, qr: null };
-    }
-  }
-
-  /**
-   * Fetches the QR code image from WAHA as a Base64 data URL
-   */
   public async fetchQrCode(): Promise<string | null> {
+    const response = await this.request(`${this.baseUrl}/api/${this.sessionName}/auth/qr?format=raw`, {}, 5000);
+    const raw = await response.json();
+    if (raw.value) return qrcode.toDataURL(raw.value);
+    return null;
+  }
+  public async startSession() {
+    await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName, enabled: true }, update: { enabled: true } });
+    this.failures = 0;
+    this.nextRecoveryAt = 0;
+    await this.reconcile();
+    return true;
+  }
+  public async stopSession() {
+    // Persist intent before the network call so an outage cannot undo Disconnect.
+    await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName, enabled: false }, update: { enabled: false } });
+    this.setStatus('disconnected');
+    await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/stop`, { method: 'POST' });
+    return true;
+  }
+  public async restartSession() {
+    await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName, enabled: true }, update: { enabled: true } });
+    await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/restart`, { method: 'POST' });
+    this.setStatus('connecting');
+    return true;
+  }
+  public reconcile(): Promise<void> {
+    if (this.running) return this.running;
+    this.running = this.reconcileOnce().finally(() => { this.running = null; });
+    return this.running;
+  }
+  private async reconcileOnce() {
     try {
-      // First attempt: Request raw string value and encode with qrcode
-      const rawRes = await fetch(`${this.baseUrl}/api/${this.sessionName}/auth/qr?format=raw`, {
-        headers: this.getHeaders(),
-        signal: AbortSignal.timeout(4000)
-      });
-
-      if (rawRes.ok) {
-        const rawJson = await rawRes.json().catch(() => null);
-        if (rawJson && rawJson.value) {
-          return await qrcode.toDataURL(rawJson.value);
-        }
+      const preference = await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName }, update: {} });
+      if (!preference.enabled) {
+        this.setStatus('disconnected');
+        try { await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/stop`, { method: 'POST' }); }
+        catch (error) { if (!(error instanceof WAHAHttpError) || error.status !== 404) throw error; }
+        return;
       }
-
-      // Fallback: Request JSON image format
-      const imgRes = await fetch(`${this.baseUrl}/api/${this.sessionName}/auth/qr?format=image`, {
-        headers: { ...this.getHeaders(), 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(4000)
-      });
-
-      if (imgRes.ok) {
-        const imgJson = await imgRes.json().catch(() => null);
-        if (imgJson && imgJson.data) {
-          const mime = imgJson.mimetype || 'image/png';
-          return `data:${mime};base64,${imgJson.data}`;
-        }
-      }
-
-      // Fallback 2: Direct binary image buffer
-      const binRes = await fetch(`${this.baseUrl}/api/${this.sessionName}/auth/qr`, {
-        headers: { ...this.getHeaders(), 'Accept': 'image/png' },
-        signal: AbortSignal.timeout(4000)
-      });
-
-      if (binRes.ok) {
-        const arrayBuf = await binRes.arrayBuffer();
-        const base64 = Buffer.from(arrayBuf).toString('base64');
-        return `data:image/png;base64,${base64}`;
-      }
-
-      return null;
-    } catch (err: any) {
-      console.warn('[WAHA] fetchQrCode error:', err.message);
-      return null;
-    }
-  }
-
-  /**
-   * Returns current cached status (instant response for UI/Sockets)
-   */
-  public getStatus() {
-    return {
-      status: this.currentStatus,
-      qr: this.currentQr
-    };
-  }
-
-  public isConnected(): boolean {
-    return this.currentStatus === 'connected';
-  }
-
-  /**
-   * Starts or resumes the WhatsApp session in WAHA
-   */
-  public async startSession(): Promise<boolean> {
-    try {
-      this.currentStatus = 'connecting';
-      if (this.onStatus) this.onStatus(this.currentStatus);
-
-      // Ensure session exists or start it
       const session = await this.ensureSession();
-      if (!session) {
-        await fetch(`${this.baseUrl}/api/sessions/${this.sessionName}/start`, {
-          method: 'POST',
-          headers: this.getHeaders()
-        });
+      const previouslyConnected = this.isConnected();
+      if (session.status === 'STOPPED') {
+        await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/start`, { method: 'POST' });
+        this.setStatus('connecting');
+      } else if (session.status === 'FAILED') {
+        this.setStatus('disconnected');
+        if (this.failures < 3 && Date.now() >= this.nextRecoveryAt) {
+          this.failures++;
+          this.nextRecoveryAt = Date.now() + 30000 * this.failures;
+          await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/restart`, { method: 'POST' });
+          this.setStatus('connecting');
+        }
+      } else {
+        await this.updateStatus();
+        if (this.isConnected()) {
+          this.failures = 0;
+          if (!previouslyConnected) await this.syncAllGroups();
+        }
       }
-
-      // Poll status after a short delay
-      setTimeout(() => this.updateStatus(), 1500);
-      return true;
-    } catch (err: any) {
-      console.error('[WAHA] startSession error:', err.message);
-      this.currentStatus = 'disconnected';
-      if (this.onStatus) this.onStatus(this.currentStatus);
-      return false;
-    }
+    } catch (error) { this.setStatus('disconnected'); throw error; }
   }
-
-  /**
-   * Stops the WhatsApp session
-   */
-  public async stopSession(): Promise<boolean> {
-    try {
-      const res = await fetch(`${this.baseUrl}/api/sessions/${this.sessionName}/stop`, {
-        method: 'POST',
-        headers: this.getHeaders()
-      });
-      this.currentStatus = 'disconnected';
-      this.currentQr = null;
-      if (this.onStatus) this.onStatus(this.currentStatus);
-      return res.ok;
-    } catch (err: any) {
-      console.error('[WAHA] stopSession error:', err.message);
-      return false;
-    }
-  }
-
-  /**
-   * Restarts the session (useful for resetting connection)
-   */
-  public async restartSession(): Promise<boolean> {
-    try {
-      this.currentStatus = 'connecting';
-      this.currentQr = null;
-      if (this.onStatus) this.onStatus(this.currentStatus);
-
-      await fetch(`${this.baseUrl}/api/sessions/${this.sessionName}/restart`, {
-        method: 'POST',
-        headers: this.getHeaders()
-      });
-
-      setTimeout(() => this.updateStatus(), 2000);
-      return true;
-    } catch (err: any) {
-      console.error('[WAHA] restartSession error:', err.message);
-      return false;
-    }
-  }
-
-  /**
-   * Sends a text message with optional mentions via WAHA
-   */
   public async sendMessage(chatId: string, text: string, mentions?: string[]): Promise<any> {
-    const normalizedChatId = chatId.includes('@s.whatsapp.net') 
-      ? chatId.replace('@s.whatsapp.net', '@c.us') 
-      : chatId;
-
-    const normalizedMentions = mentions?.map(m => 
-      m.includes('@s.whatsapp.net') ? m.replace('@s.whatsapp.net', '@c.us') : m
-    );
-
-    const body: any = {
-      session: this.sessionName,
-      chatId: normalizedChatId,
-      text
-    };
-
-    if (normalizedMentions && normalizedMentions.length > 0) {
-      body.mentions = normalizedMentions;
-    }
-
-    const res = await fetch(`${this.baseUrl}/api/sendText`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify(body)
+    const normalize = (id: string) => id.replace('@s.whatsapp.net', '@c.us');
+    const response = await this.request(`${this.baseUrl}/api/sendText`, {
+      method: 'POST', body: JSON.stringify({ session: this.sessionName, chatId: normalize(chatId), text, mentions: mentions?.map(normalize) }),
     });
-
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => res.statusText);
-      throw new Error(`WAHA sendText failed (${res.status}): ${errorText}`);
-    }
-
-    return await res.json().catch(() => ({ success: true }));
+    return response.json();
   }
-
-  /**
-   * Syncs all participating WhatsApp groups from WAHA into PostgreSQL
-   */
+  public async getHistory(offset: number, from: number, until: number) {
+    const query = new URLSearchParams({ limit: '100', offset: String(offset), downloadMedia: 'false', 'filter.timestamp.gte': String(from), 'filter.timestamp.lte': String(until) });
+    return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/all/messages?${query}`, {}, 15000)).json();
+  }
+  public async getChatOverview(offset = 0) {
+    return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/overview?limit=100&offset=${offset}`, {}, 15000)).json();
+  }
+  public async getMessage(chatId: string, id: string) {
+    return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/${encodeURIComponent(chatId.replace('@s.whatsapp.net','@c.us'))}/messages/${encodeURIComponent(id)}?downloadMedia=true`, {}, 15000)).json();
+  }
   public async syncAllGroups(): Promise<void> {
     try {
       console.log('> [WAHA] Fetching all participating groups...');
-      const res = await fetch(`${this.baseUrl}/api/${this.sessionName}/groups`, {
+      const res = await this.request(`${this.baseUrl}/api/${this.sessionName}/groups`, {
         headers: this.getHeaders()
       });
 
@@ -425,7 +213,7 @@ export class WAHAService {
    */
   public async fetchAndSaveGroupMetadata(groupJid: string): Promise<void> {
     try {
-      const res = await fetch(`${this.baseUrl}/api/${this.sessionName}/groups/${groupJid}`, {
+      const res = await this.request(`${this.baseUrl}/api/${this.sessionName}/groups/${groupJid}`, {
         headers: this.getHeaders()
       });
       if (res.ok) {
@@ -443,4 +231,4 @@ export class WAHAService {
   }
 }
 
-export const wahaService = WAHAService.getInstance();
+export const wahaService = new WAHAService();

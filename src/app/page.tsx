@@ -18,7 +18,7 @@ export default function Page() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#111B21]">
+      <div className="flex h-screen items-center justify-center bg-[#ffffff]">
         <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-t-2 border-[#00A884]"></div>
       </div>
     );

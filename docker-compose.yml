@@ -18,18 +18,24 @@ services:
       retries: 5
 
   mywa-waha:
-    image: devlikeapro/waha:latest
+    image: ${WAHA_IMAGE:?WAHA_IMAGE digest is required}
     container_name: mywa-waha
     restart: unless-stopped
     ports:
       - "${WAHA_PORT:-3000}:3000"
     environment:
+      - WAHA_API_KEY=${WAHA_API_KEY:?WAHA_API_KEY is required}
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
       - WAHA_DASHBOARD_ENABLED=true
       - WAHA_DASHBOARD_USERNAME=${WAHA_DASHBOARD_USERNAME:-admin}
       - WAHA_DASHBOARD_PASSWORD=${WAHA_DASHBOARD_PASSWORD:-MyWA_123}
-      - WHATSAPP_HOOK_URL=http://mywa-app:3060/api/whatsapp/webhook
-      - WHATSAPP_HOOK_EVENTS=message,message.any,session.status
+      - WHATSAPP_HOOK_URL=${WAHA_WEBHOOK_URL:-http://mywa-app:${PORT:-3060}/api/whatsapp/webhook}
+      - WHATSAPP_HOOK_HMAC_KEY=${WAHA_WEBHOOK_SECRET:?WAHA_WEBHOOK_SECRET is required}
+      - WHATSAPP_HOOK_RETRIES_POLICY=exponential
+      - WHATSAPP_HOOK_RETRIES_DELAY_SECONDS=2
+      - WHATSAPP_HOOK_RETRIES_ATTEMPTS=10
+      - WHATSAPP_HOOK_EVENTS=message.any,session.status,message.ack,message.reaction,message.edited,message.revoked,call.received,call.accepted,call.rejected
+      - WAHA_API_DOWNLOAD_MEDIA=true
     volumes:
       - mywa_waha_sessions:/app/.sessions
 
@@ -48,13 +54,22 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      WAHA_IMAGE: ${WAHA_IMAGE:?WAHA_IMAGE digest is required}
+      WAHA_API_KEY: ${WAHA_API_KEY:?WAHA_API_KEY is required}
+      WAHA_WEBHOOK_SECRET: ${WAHA_WEBHOOK_SECRET:?WAHA_WEBHOOK_SECRET is required}
+      WAHA_SESSION_NAME: ${WAHA_SESSION_NAME:-default}
       WAHA_API_URL: http://mywa-waha:3000
       UPLOAD_DIR: /app/public/uploads
+      UPLOAD_QUOTA_MB: ${UPLOAD_QUOTA_MB:-5120}
+      MEDIA_DIR: /app/data/media
+      MEDIA_MAX_MB: ${MEDIA_MAX_MB:-100}
+      MEDIA_QUOTA_MB: ${MEDIA_QUOTA_MB:-10240}
       MAX_FILE_SIZE: ${MAX_FILE_SIZE:-50}
       APP_URL: ${APP_URL:?APP_URL is required}
-      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-*}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-${APP_URL}}
     volumes:
       - mywa_uploads:/app/public/uploads
+      - mywa_media:/app/data/media
     depends_on:
       mywa-db:
         condition: service_healthy
@@ -62,6 +77,8 @@ services:
         condition: service_started
 
 volumes:
+  mywa_media:
+    driver: local
   mywa_pgdata:
     driver: local
   mywa_uploads:

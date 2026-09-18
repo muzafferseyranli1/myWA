@@ -8,6 +8,7 @@ import {
   TextInput,
   RefreshControl,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Users, User, Search, CheckSquare } from 'lucide-react-native';
@@ -42,6 +43,7 @@ export const ChatListScreen = () => {
 
   // Realtime updates
   useSocket({
+    onReconnect: () => { void fetchChats(); },
     onChatUpdated: () => {
       fetchChats();
     },
@@ -74,7 +76,7 @@ export const ChatListScreen = () => {
         activeOpacity={0.7}
       >
         <View style={[styles.avatar, item.isGroup ? styles.avatarGroup : styles.avatarDirect]}>
-          {item.isGroup ? (
+          {item.avatarUrl ? <Image source={{uri:item.avatarUrl}} style={{width:48,height:48,borderRadius:24}}/> : item.isGroup ? (
             <Users size={22} color="#fff" />
           ) : (
             <User size={22} color="#fff" />
@@ -91,13 +93,13 @@ export const ChatListScreen = () => {
 
           <View style={styles.chatBottomRow}>
             <Text style={styles.lastMessage} numberOfLines={1}>
-              {item.lastMessage?.body || 'Henüz mesaj yok'}
+              {item.lastMessage?.body || 'WhatsApp iletisi'}
             </Text>
 
-            {item.taskCount !== undefined && item.taskCount > 0 ? (
+            {item.unreadCount !== undefined && item.unreadCount > 0 ? (
               <View style={styles.taskCountBadge}>
-                <CheckSquare size={11} color={COLORS.whatsappGreen} />
-                <Text style={styles.taskCountText}>{item.taskCount}</Text>
+                
+                <Text style={styles.taskCountText}>{item.unreadCount}</Text>
               </View>
             ) : null}
           </View>

@@ -1,6 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service';
 
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if ((req as any).user?.role !== 'ADMIN') return res.status(403).json({ error: 'Yönetici yetkisi gerekli' });
+  next();
+};
+
 export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {

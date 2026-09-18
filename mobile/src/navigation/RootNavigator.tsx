@@ -6,12 +6,14 @@ import { useAuthStore } from '../store/auth.store';
 import { LoginScreen } from '../screens/LoginScreen';
 import { TabNavigator } from './TabNavigator';
 import { ChatWindowScreen } from '../screens/ChatWindowScreen';
+import { useSocketConnection } from '../hooks/useSocket';
 import { COLORS } from '../lib/constants';
 
 const Stack = createNativeStackNavigator();
 
 export const RootNavigator = () => {
   const { token, isLoading, checkAuth } = useAuthStore();
+  useSocketConnection(token);
 
   useEffect(() => {
     checkAuth();

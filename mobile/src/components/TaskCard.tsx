@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { CheckCircle2, Circle, Clock, Bell, User } from 'lucide-react-native';
-import { TaskItem, TaskPriority } from '../lib/types';
+import { TaskItem, TaskPriority, deliveryLabels } from '../lib/types';
 import { COLORS } from '../lib/constants';
 
 interface TaskCardProps {
@@ -79,6 +79,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           >
             {task.title}
           </Text>
+          {task.notification && <Text style={styles.chatName}>{deliveryLabels[task.notification.status]}</Text>}
           {task.chat && (
             <Text style={styles.chatName} numberOfLines={1}>
               💬 {task.chat.name}

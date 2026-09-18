@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   contacts = [],
 }) => {
   const insets = useSafeAreaInsets();
+  const requestId = useRef<string | null>(null);
   const [title, setTitle] = useState(sourceMessage?.body ? sourceMessage.body.slice(0, 80) : '');
   const [description, setDescription] = useState(sourceMessage?.body || '');
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
@@ -62,6 +63,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     );
   };
 
+  useEffect(() => {
+    if (visible) { requestId.current = null; setTitle(sourceMessage?.body?.slice(0,80) || ''); setDescription(sourceMessage?.body || ''); }
+  }, [visible, sourceMessage?.id]);
+
   const handleSave = async () => {
     if (!title.trim()) return;
 
@@ -75,6 +80,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     setIsSubmitting(true);
     try {
       await onSubmit({
+        clientRequestId: requestId.current ||= Date.now() + '_' + Math.random().toString(36).slice(2),
         chatId,
         title: title.trim(),
         description: description.trim() || undefined,
@@ -86,10 +92,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         notifyOnCreate,
       });
       // reset
+      requestId.current = null;
       setTitle('');
       setDescription('');
       onClose();
-    } finally {
+    } catch { /* Parent displays error; keep the operation ID for retry. */ } finally {
       setIsSubmitting(false);
     }
   };

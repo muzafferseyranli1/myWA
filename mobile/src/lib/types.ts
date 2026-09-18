@@ -2,7 +2,7 @@
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
-export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'SYSTEM' | 'REACTION';
+export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'SYSTEM';
 
 export interface ChatItem {
   id: string;
@@ -31,6 +31,7 @@ export interface ContactItem {
 }
 
 export interface MessageItem {
+  ack?:number|null; revoked?:boolean; editedAt?:string|null; reactions?:{senderId:string;text:string}[];
   id: string;
   chatId: string;
   senderId: string | null;
@@ -48,6 +49,7 @@ export interface MessageItem {
 }
 
 export interface TaskItem {
+  notification?: NotificationItem | null;
   id: string;
   chatId: string;
   sourceMessageId: string | null;
@@ -76,6 +78,7 @@ export interface TaskAssigneeItem {
 }
 
 export interface CreateTaskRequest {
+  clientRequestId?: string;
   chatId: string;
   sourceMessageId?: string;
   sourceMessageBody?: string;
@@ -120,3 +123,13 @@ export interface AuthUser {
   displayName: string;
   role: string;
 }
+
+export type DeliveryStatus = 'PENDING' | 'PROCESSING' | 'ACCEPTED' | 'FAILED' | 'UNKNOWN' | 'CANCELLED';
+export interface NotificationItem {
+  id: string; taskId: string | null; chatId: string; kind: string; status: DeliveryStatus;
+  attempts: number; lastError: string | null; createdAt: string; updatedAt: string;
+}
+export const deliveryLabels: Record<DeliveryStatus, string> = {
+  PENDING: 'Bildirim bekliyor', PROCESSING: 'Gönderiliyor', ACCEPTED: 'WAHA kabul etti',
+  FAILED: 'Gönderim başarısız', UNKNOWN: 'Gönderim sonucu belirsiz', CANCELLED: 'İptal edildi',
+};

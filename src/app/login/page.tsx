@@ -37,11 +37,11 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#111B21] px-4">
-      <div className="w-full max-w-md rounded-lg bg-[#202C33] p-8 shadow-lg border border-[#222E35]">
+    <div className="flex min-h-screen items-center justify-center bg-[#ffffff] px-4">
+      <div className="w-full max-w-md rounded-lg bg-[#f0f2f5] p-8 shadow-lg border border-[#e9edef]">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-[#E9EDEF]">MyWA</h1>
-          <p className="mt-2 text-[#8696A0]">WhatsApp Görev Yönetimi</p>
+          <h1 className="text-3xl font-bold text-[#111b21]">MyWA</h1>
+          <p className="mt-2 text-[#667781]">WhatsApp Görev Yönetimi</p>
         </div>
 
         {error && (
@@ -52,7 +52,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-[#8696A0] mb-2">
+            <label className="block text-sm font-medium text-[#667781] mb-2">
               Kullanıcı Adı
             </label>
             <input
@@ -60,12 +60,12 @@ export default function LoginPage() {
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-md bg-[#2A3942] border border-[#222E35] px-4 py-2 text-[#E9EDEF] focus:border-[#00A884] focus:outline-none focus:ring-1 focus:ring-[#00A884]"
+              className="w-full rounded-md bg-[#e9edef] border border-[#e9edef] px-4 py-2 text-[#111b21] focus:border-[#00A884] focus:outline-none focus:ring-1 focus:ring-[#00A884]"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-[#8696A0] mb-2">
+            <label className="block text-sm font-medium text-[#667781] mb-2">
               Şifre
             </label>
             <input
@@ -73,14 +73,14 @@ export default function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md bg-[#2A3942] border border-[#222E35] px-4 py-2 text-[#E9EDEF] focus:border-[#00A884] focus:outline-none focus:ring-1 focus:ring-[#00A884]"
+              className="w-full rounded-md bg-[#e9edef] border border-[#e9edef] px-4 py-2 text-[#111b21] focus:border-[#00A884] focus:outline-none focus:ring-1 focus:ring-[#00A884]"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-[#00A884] px-4 py-2 font-medium text-[#111B21] hover:bg-[#008f6f] focus:outline-none disabled:opacity-50 transition-colors"
+            className="w-full rounded-md bg-[#00A884] px-4 py-2 font-medium text-[#ffffff] hover:bg-[#008f6f] focus:outline-none disabled:opacity-50 transition-colors"
           >
             {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
           </button>

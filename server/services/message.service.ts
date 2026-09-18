@@ -1,16 +1,17 @@
 import { prisma } from '../lib/prisma';
-import type { MessageType } from '../../src/lib/types';
+import type { Prisma, MessageType } from '@prisma/client';
 import { contactResolver } from './contact-resolver.service';
+import { mediaView } from '../lib/media';
 
 export const messageService = {
-  async saveMessage(data: any) {
+  async saveMessage(data: any, db: Prisma.TransactionClient = prisma) {
     const {
       id, chatId, chatName, isGroup, senderId, senderPhone, senderName,
-      body, quotedText, quotedSender, messageType, mediaUrl, mediaName, mediaMime, isFromMe, timestamp
+      body, quotedText, quotedSender, messageType, mediaUrl, mediaName, mediaMime, isFromMe, timestamp, ack, preview
     } = data;
 
     // Only update chat name if it's provided and not a fallback JID or if current chat name is numeric/ID
-    const existingChat = await prisma.chat.findUnique({ where: { id: chatId } });
+    const existingChat = await db.chat.findUnique({ where: { id: chatId } });
     const isSelfChat = chatId.includes('905332760534') || chatId === '31933115404296@lid';
     let resolvedChatName = chatName;
     if (!isGroup) {
@@ -35,12 +36,12 @@ export const messageService = {
       (isSelfChat || resolvedChatName !== 'Muzaffer') &&
       (!existingChat || isCurrentNameNumeric || isCurrentNameCorrupted);
 
-    await prisma.chat.upsert({
+    await db.chat.upsert({
       where: { id: chatId },
       update: {
         ...(shouldUpdateName ? { name: resolvedChatName } : {}),
         isGroup: !!isGroup,
-        updatedAt: timestamp ? new Date(timestamp) : new Date()
+        updatedAt: existingChat && timestamp && existingChat.updatedAt > new Date(timestamp) ? existingChat.updatedAt : timestamp ? new Date(timestamp) : new Date()
       },
       create: {
         id: chatId,
@@ -56,7 +57,7 @@ export const messageService = {
       const isLid = contactResolver.isLid(senderId);
       const cleanPhone = senderPhone && !contactResolver.isLid(senderPhone) ? senderPhone : (!isLid ? senderId.split('@')[0] : null);
 
-      const contact = await prisma.contact.upsert({
+      const contact = await db.contact.upsert({
         where: { id: senderId },
         update: {
           pushName: senderName || undefined,
@@ -92,7 +93,7 @@ export const messageService = {
     }
 
     // Create or update message record
-    const message = await prisma.message.upsert({
+    const message = await db.message.upsert({
       where: { id: id || `${Date.now()}_${Math.random()}` },
       update: {
         body: body || '',
@@ -102,6 +103,8 @@ export const messageService = {
         mediaUrl: mediaUrl || null,
         mediaName: mediaName || null,
         mediaMime: mediaMime || null,
+        ack,
+        ...(preview ? {preview} : {}),
       },
       create: {
         id: id || `${Date.now()}_${Math.random()}`,
@@ -116,6 +119,8 @@ export const messageService = {
         mediaMime: mediaMime || null,
         isFromMe: !!isFromMe,
         timestamp: timestamp ? new Date(timestamp) : new Date(),
+        ack,
+        ...(preview ? {preview} : {}),
       },
       include: {
         sender: true
@@ -125,13 +130,15 @@ export const messageService = {
     return message;
   },
 
-  async getMessagesByChat(chatId: string, page: number = 1, limit: number = 100) {
+  async getMessagesByChat(chatId: string, page: number = 1, limit: number = 100, before?: string) {
     const skip = (page - 1) * limit;
+    const cursor = before ? await prisma.message.findFirst({where:{id:before,chatId}}) : null;
+    if (before && !cursor) throw new Error('Invalid message cursor');
     
     const messages = await prisma.message.findMany({
-      where: { chatId },
-      orderBy: { timestamp: 'desc' },
-      skip,
+      where: { chatId, ...(cursor ? {OR:[{timestamp:{lt:cursor.timestamp}},{timestamp:cursor.timestamp,id:{lt:cursor.id}}]}:{}) },
+      orderBy: [{ timestamp: 'desc' },{id:'desc'}],
+      skip: cursor ? 0 : skip,
       take: limit,
       include: {
         sender: true,
@@ -160,17 +167,17 @@ export const messageService = {
           if (resolved && !resolved.includes('@')) qSender = resolved;
         }
       }
-      return {
+      return mediaView({
         ...msg,
         quotedSender: qSender
-      };
+      });
     }));
 
     return {
       messages: resolvedMessages.reverse(),
       total,
       page,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit), hasMore: messages.length === limit, nextBefore: messages.at(-1)?.id || null
     };
   }
 };
