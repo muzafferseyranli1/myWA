@@ -3,9 +3,18 @@ import { acceptEvent } from '../services/delivery.service';
 import { verifySignature, eventKey, parseMessage } from '../lib/reliability';
 const router = Router();
 router.post('/', raw({ type: 'application/json', limit: '2mb' }), async (req, res) => {
-  if (!Buffer.isBuffer(req.body) || !verifySignature(req.body, req.headers['x-webhook-hmac'], req.headers['x-webhook-hmac-algorithm'], process.env.WAHA_WEBHOOK_SECRET || '')) {
-    return res.status(401).json({ error: 'Invalid webhook signature' });
+  const secret = process.env.WAHA_WEBHOOK_SECRET || '';
+  const hmac = req.headers['x-webhook-hmac'];
+  const algo = req.headers['x-webhook-hmac-algorithm'];
+
+  if (hmac) {
+    if (!Buffer.isBuffer(req.body) || !verifySignature(req.body, hmac, algo, secret)) {
+      return res.status(401).json({ error: 'Invalid webhook signature' });
+    }
+  } else if (process.env.STRICT_WEBHOOK_HMAC === 'true') {
+    return res.status(401).json({ error: 'Missing webhook signature' });
   }
+
   let body: any;
   try {
     body = JSON.parse(req.body.toString('utf8'));

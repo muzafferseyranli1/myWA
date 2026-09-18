@@ -1,8 +1,11 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export function verifySignature(body: Buffer, signature: unknown, algorithm: unknown, key: string): boolean {
-  if (!key || algorithm !== 'sha512' || typeof signature !== 'string' || !/^[a-f\d]{128}$/i.test(signature)) return false;
-  return timingSafeEqual(createHmac('sha512', key).update(body).digest(), Buffer.from(signature, 'hex'));
+  if (!key || (algorithm !== 'sha512' && algorithm !== 'sha256') || typeof signature !== 'string') return false;
+  const algo = algorithm as 'sha512' | 'sha256';
+  const expectedLen = algo === 'sha512' ? 128 : 64;
+  if (signature.length !== expectedLen || !/^[a-f\d]+$/i.test(signature)) return false;
+  return timingSafeEqual(createHmac(algo, key).update(body).digest(), Buffer.from(signature, 'hex'));
 }
 
 export function eventKey(event: any): string {
