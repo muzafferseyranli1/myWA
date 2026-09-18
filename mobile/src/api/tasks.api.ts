@@ -32,4 +32,8 @@ export const tasksApi = {
     const res = await apiClient.post('/api/tasks/remind', { scope, chatId });
     return res.data;
   },
+  getTasksByChat: async (chatId: string): Promise<TaskItem[]> => {
+    const res = await apiClient.get(`/api/chats/${encodeURIComponent(chatId)}/tasks`);
+    return res.data;
+  },
 };

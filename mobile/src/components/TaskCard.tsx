@@ -110,6 +110,14 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         </Text>
       ) : null}
 
+      {task.completionNote ? (
+        <View style={styles.completionBox}>
+          <Text style={styles.completionText} numberOfLines={2}>
+            📝 {task.completionNote}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.footer}>
         <View style={styles.metaLeft}>
           {formattedDate && (
@@ -181,11 +189,27 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   cardDone: {
-    opacity: 0.65,
-    backgroundColor: '#0e161b',
+    opacity: 0.85,
+    backgroundColor: '#f8fafc',
+    borderColor: '#bbf7d0',
   },
   cardOverdue: {
     borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  completionBox: {
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dcfce7',
+    marginLeft: 32,
+  },
+  completionText: {
+    fontSize: 12,
+    color: '#15803d',
+    fontStyle: 'italic',
   },
   header: {
     flexDirection: 'row',

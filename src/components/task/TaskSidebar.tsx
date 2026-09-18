@@ -1,12 +1,12 @@
 'use client';
 
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, X } from 'lucide-react';
 import TaskCard from './TaskCard';
 import { useState } from 'react';
 import CreateTaskModal from './CreateTaskModal';
 import EditTaskModal from './EditTaskModal';
 
-export default function TaskSidebar({ chatId, tasks, contacts, onRefresh }: any) {
+export default function TaskSidebar({ chatId, tasks, contacts, onRefresh, onClose }: any) {
   const [filter, setFilter] = useState('Tümü');
   const [search, setSearch] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -25,8 +25,20 @@ export default function TaskSidebar({ chatId, tasks, contacts, onRefresh }: any)
   return (
     <div className="flex h-full flex-col bg-[#ffffff]">
       <div className="flex h-[60px] items-center justify-between border-b border-[#e9edef] bg-[#f0f2f5] px-4">
-        <h2 className="text-lg font-medium text-[#111b21]">Görevler</h2>
-        <button onClick={() => setIsCreateOpen(true)} className="flex items-center space-x-1 rounded bg-[#00A884] px-2 py-1 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f]">
+        <div className="flex items-center gap-2">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="rounded-full p-1.5 text-[#54656f] hover:bg-[#e9edef] transition-colors"
+              title="Kapat"
+              aria-label="Kapat"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+          <h2 className="text-lg font-medium text-[#111b21]">Görevler</h2>
+        </div>
+        <button onClick={() => setIsCreateOpen(true)} className="flex items-center space-x-1 rounded bg-[#00A884] px-2.5 py-1 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f]">
           <Plus className="h-4 w-4" />
           <span>Yeni</span>
         </button>
