@@ -1,7 +1,10 @@
 # MyWA Devir Notu - WhatsApp Benzeri Panel ve Kararlilik Calismasi
 
+> **GÜNCEL DEVİR DOKÜMANI:** Canlı dağıtım tamamlanmış, tüm Coolify/Docker build ve runtime hataları çözülmüş, WAHA oturumu sıfırlanarak QR kod canlıya alınmıştır. En güncel devir notları için lütfen ana dizindeki [**HANDOFF.md**](file:///x:/MyWA/HANDOFF.md) dosyasını referans alınız.
+
 Tarih: 2026-09-18
 Calisma klasoru: X:\MyWA
+
 
 ## 0. Bu Oturumda Ne Yapildi
 
