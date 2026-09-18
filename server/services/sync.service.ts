@@ -33,7 +33,12 @@ export async function syncHistory() {
     discoveryOffset = chats.length ? discoveryOffset + 100 : 0;
     if (chats.length) events.emit('chat_updated');
   } catch (error: any) {
-    await prisma.syncState.update({where:{session},data:{lastError: error.status ? `WAHA HTTP ${error.status}; geçmiş erişimi ve NOWEB store ayarını kontrol edin.` : 'Geçmiş eşitleme tamamlanamadı; otomatik yeniden denenecek.'}});
+    if (error.status === 400 || error.status === 404 || error.status === 501) {
+      // WAHA store is not enabled for this session; real-time messaging continues normally.
+      await prisma.syncState.update({where:{session},data:{lastError: null}});
+      return;
+    }
+    await prisma.syncState.update({where:{session},data:{lastError: 'Geçmiş eşitleme tamamlanamadı; otomatik yeniden denenecek.'}});
     throw error;
   }
 }
