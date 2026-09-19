@@ -23,15 +23,15 @@ export async function enqueue(db: DB, data: { operationKey: string; chatId: stri
 }
 export function taskPayload(
   task: any,
-  kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED',
-  extra?: { reason?: string; by?: string }
+  kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED' | 'TASK_CREATED_DM',
+  extra?: { reason?: string; by?: string; groupName?: string; recipientName?: string }
 ) {
   const mentions: string[] = [];
-  const tags = task.assignees.map((a: any) => {
+  const tags = task.assignees?.map((a: any) => {
     const resolved = contactResolver.resolveAssigneeMention(a.contact);
     if (resolved.jid) mentions.push(resolved.jid);
     return resolved.tag;
-  }).filter(Boolean).join(' ');
+  }).filter(Boolean).join(' ') || '';
   const date = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' }) : 'Belirtilmedi';
   const taskUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
 
@@ -51,6 +51,19 @@ export function taskPayload(
     }
     text += `\n🔗 Görevi incele: ${taskUrl}`;
     return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined, linkPreview: false };
+  }
+
+  if (kind === 'TASK_CREATED_DM') {
+    const groupName = extra?.groupName || task.chat?.name || 'WhatsApp Grubu';
+    text = `📌 *Adınıza Yeni Görev Tanımlandı*\n\n*${cleanTitle}*\n`;
+    if (cleanDescription) text += `${cleanDescription}\n`;
+    text += `📁 *Grup:* ${groupName}\nÖncelik: ${task.priority}\nBitiş: ${date}\n👥 *Görevliler:* ${tags}\n`;
+    if (task.sourceMessage?.body) {
+      const cleanSource = contactResolver.formatMentionsToNamesSync(task.sourceMessage.body);
+      text += `\nKaynak mesaj: ${cleanSource}\n`;
+    }
+    text += `\n🔗 Görevi incele: ${taskUrl}`;
+    return { text, mentions: [], url: taskUrl, linkPreview: false };
   }
 
   if (kind === 'TASK_COMPLETED') {
@@ -195,6 +208,28 @@ async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: st
     return { text: `🔔 *Görev Hatırlatması*\n\n${textList.join('\n\n')}`, mentions: [...mentions], linkPreview: false };
   }
 
+  if (job.kind === 'REMINDER_DM') {
+    if (payload.day && payload.day !== istanbulDay()) return null;
+    const tasks = await prisma.task.findMany({
+      where: { id: { in: payload.taskIds }, status: { not: 'DONE' } },
+      include: { chat: true }
+    });
+    if (!tasks.length) return null;
+    const recipient = payload.recipientName ? `Sn. *${payload.recipientName}*, ` : '';
+    const textList = await Promise.all(tasks.map(async task => {
+      const groupName = task.chat?.name || 'WhatsApp Grubu';
+      const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+      const shortLink = await urlShortenerService.shortenUrl(rawUrl);
+      const date = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' }) : 'Belirtilmedi';
+      return `📋 *${task.title}* (${groupName})\nBitiş: ${date}\n🔗 ${shortLink}`;
+    }));
+    return {
+      text: `🔔 *Kişisel Görev Hatırlatması*\n\n${recipient}üzerinizde bekleyen görev(ler):\n\n${textList.join('\n\n')}`,
+      mentions: [],
+      linkPreview: false
+    };
+  }
+
   let text = payload.text || '';
   if (payload.url) {
     const shortLink = await urlShortenerService.shortenUrl(payload.url);
@@ -267,14 +302,42 @@ export async function queueReminders(db: DB, scope: string, chatId?: string, day
   const tasks = await db.task.findMany({ where: {
     status: { not: 'DONE' }, ...(chatId ? { chatId } : {}), ...(taskId ? { id: taskId } : {}),
     ...(scope === 'overdue' ? { dueDate: { lt: now } } : scope === 'due_soon' ? { dueDate: { gte: now, lte: new Date(now.getTime() + 3 * 86400000) } } : {}),
-  } });
+  }, include: { assignees: { include: { contact: true } }, chat: true } });
+
   const groups = new Map<string, string[]>();
   for (const task of tasks) groups.set(task.chatId, [...(groups.get(task.chatId) || []), task.id]);
   for (const [chat, taskIds] of groups) await enqueue(db, {
     operationKey: day ? `reminder:${day}:${scope}:${chat}` : `reminder:${randomUUID()}`,
     chatId: chat, taskId, kind: 'REMINDER', payload: { taskIds, ...(day ? { day } : {}) },
   });
-  return { queued: tasks.length, sent: 0, chats: groups.size };
+
+  // Direct DM reminders for assignees whose tasks have notifyAssigneesDirectly === true
+  const directAssigneeTasks = new Map<string, { contact: any; taskIds: string[] }>();
+  for (const task of tasks) {
+    if ((task as any).notifyAssigneesDirectly && task.assignees?.length) {
+      for (const a of task.assignees) {
+        const dmChatId = contactResolver.resolveDirectChatId(a.contact);
+        if (dmChatId && dmChatId !== task.chatId) {
+          const entry = directAssigneeTasks.get(dmChatId) || { contact: a.contact, taskIds: [] };
+          if (!entry.taskIds.includes(task.id)) {
+            entry.taskIds.push(task.id);
+          }
+          directAssigneeTasks.set(dmChatId, entry);
+        }
+      }
+    }
+  }
+
+  for (const [dmChatId, { contact, taskIds }] of directAssigneeTasks) {
+    const recipientName = contact.displayName || contact.pushName || contactResolver.getDisplayNameSync(contact.id) || 'Görevli';
+    await enqueue(db, {
+      operationKey: day ? `reminder:dm:${day}:${scope}:${dmChatId}` : `reminder:dm:${randomUUID()}:${dmChatId}`,
+      chatId: dmChatId, taskId, kind: 'REMINDER_DM',
+      payload: { taskIds, recipientName, ...(day ? { day } : {}) },
+    });
+  }
+
+  return { queued: tasks.length, sent: 0, chats: groups.size, directDMs: directAssigneeTasks.size };
 }
 export async function runScheduler(now = new Date()) {
   if (!reminderDue(now)) return;

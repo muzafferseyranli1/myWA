@@ -45,6 +45,7 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
   );
   const [completionNote, setCompletionNote] = useState(task?.completionNote || '');
   const [reactivateReason, setReactivateReason] = useState('');
+  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(Boolean(task?.notifyAssigneesDirectly));
   const [searchContact, setSearchContact] = useState('');
   const [loading, setLoading] = useState(false);
   const [showDoneMsg, setShowDoneMsg] = useState(false);
@@ -86,6 +87,7 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
           priority,
           dueDate: dueDate ? new Date(dueDate).toISOString() : null,
           assigneeIds,
+          notifyAssigneesDirectly,
           completionNote: status === 'DONE' ? (completionNote.trim() || undefined) : undefined,
           reactivateReason: isReactivating ? reactivateReason.trim() : undefined
         })
@@ -285,6 +287,13 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
                   </label>
                 ))}
               </div>
+            </div>
+
+            <div className="pt-2 border-t border-[#e9edef]">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" checked={notifyAssigneesDirectly} onChange={e => setNotifyAssigneesDirectly(e.target.checked)} className="accent-[#00A884] h-4 w-4" />
+                <span className="text-sm text-[#111b21]">Görevlilere özel mesaj (DM) ilet</span>
+              </label>
             </div>
 
           </form>

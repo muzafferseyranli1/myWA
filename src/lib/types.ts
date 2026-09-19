@@ -59,6 +59,8 @@ export interface TaskItem {
   priority: TaskPriority;
   dueDate: string | null;
   createdBy: string | null;
+  notifyOnCreate?: boolean;
+  notifyAssigneesDirectly?: boolean;
   completionNote?: string | null;
   completedAt?: string | null;
   completedBy?: string | null;
@@ -88,6 +90,7 @@ export interface CreateTaskRequest {
   dueDate?: string;
   assigneeIds?: string[];
   notifyOnCreate?: boolean;
+  notifyAssigneesDirectly?: boolean;
 }
 
 export interface UpdateTaskRequest {
@@ -97,6 +100,7 @@ export interface UpdateTaskRequest {
   priority?: TaskPriority;
   dueDate?: string | null;
   assigneeIds?: string[];
+  notifyAssigneesDirectly?: boolean;
   completionNote?: string | null;
   completedBy?: string | null;
   reactivateReason?: string | null;

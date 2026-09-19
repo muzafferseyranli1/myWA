@@ -70,6 +70,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [daysDue, setDaysDue] = useState<number | null>(3);
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
   const [notifyOnCreate, setNotifyOnCreate] = useState(true);
+  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const priorityOptions: { key: TaskPriority; label: string; color: string }[] = [
@@ -125,6 +126,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         sourceMessageBody: sourceMessage?.body || undefined,
         assigneeIds: selectedAssignees,
         notifyOnCreate,
+        notifyAssigneesDirectly,
       });
       // reset
       requestId.current = null;
@@ -263,6 +265,20 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               <Switch
                 value={notifyOnCreate}
                 onValueChange={setNotifyOnCreate}
+                trackColor={{ false: COLORS.bgInput, true: COLORS.whatsappGreen }}
+                thumbColor="#ffffff"
+              />
+            </View>
+
+            {/* Direct message (DM) toggle */}
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleTextContainer}>
+                <Text style={styles.toggleTitle}>Görevlilere Özel Mesaj (DM)</Text>
+                <Text style={styles.toggleDesc}>Atanan kişilere özel sohbetten de iletilir</Text>
+              </View>
+              <Switch
+                value={notifyAssigneesDirectly}
+                onValueChange={setNotifyAssigneesDirectly}
                 trackColor={{ false: COLORS.bgInput, true: COLORS.whatsappGreen }}
                 thumbColor="#ffffff"
               />

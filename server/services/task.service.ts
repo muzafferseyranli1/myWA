@@ -29,6 +29,27 @@ async function queueTask(
     kind,
     payload: taskPayload(task, kind, extra)
   });
+
+  // If notifyAssigneesDirectly is true and this is a TASK_CREATED notification,
+  // also send a personalized direct message (DM) to each assigned person.
+  if (kind === 'TASK_CREATED' && task.notifyAssigneesDirectly && Array.isArray(task.assignees)) {
+    for (const a of task.assignees) {
+      const dmChatId = contactResolver.resolveDirectChatId(a.contact);
+      if (dmChatId && dmChatId !== task.chatId) {
+        const dmOpKey = `TASK_CREATED_DM:${task.id}:${dmChatId}`;
+        await enqueue(tx, {
+          operationKey: dmOpKey,
+          chatId: dmChatId,
+          taskId: task.id,
+          kind: 'TASK_CREATED_DM',
+          payload: taskPayload(task, 'TASK_CREATED_DM', {
+            groupName: task.chat?.name || undefined,
+            recipientName: a.contact?.displayName || a.contact?.pushName || undefined,
+          }),
+        });
+      }
+    }
+  }
 }
 function validate(data: any, creating = false) {
   if (creating && (typeof data.title !== 'string' || !data.title.trim() || typeof data.chatId !== 'string')) throw new Error('Başlık ve sohbet zorunludur');
@@ -40,7 +61,7 @@ function validate(data: any, creating = false) {
   if (data.clientRequestId !== undefined && (typeof data.clientRequestId !== 'string' || !data.clientRequestId || data.clientRequestId.length > 128)) throw new Error('Geçersiz işlem kimliği');
 }
 export const taskService = {
-  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; clientRequestId?: string }) {
+  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; notifyAssigneesDirectly?: boolean; clientRequestId?: string }) {
     validate(data, true);
     const requestKey = `${data.createdBy}:${data.clientRequestId || randomUUID()}`;
     const task = await prisma.$transaction(async tx => {
@@ -54,6 +75,7 @@ export const taskService = {
         sourceMessageId: data.sourceMessageId || null, priority: data.priority || 'MEDIUM',
         dueDate: data.dueDate ? new Date(data.dueDate) : null, createdBy: data.createdBy || null,
         notifyOnCreate: data.notifyOnCreate !== false,
+        notifyAssigneesDirectly: Boolean(data.notifyAssigneesDirectly),
         assignees: { create: [...new Set(data.assigneeIds || [])].map(contactId => ({ contactId })) },
       }, include });
       if (created.notifyOnCreate) await queueTask(tx, created, 'TASK_CREATED');
@@ -80,6 +102,7 @@ export const taskService = {
         ...(data.priority !== undefined ? { priority: data.priority } : {}),
         ...(data.status !== undefined ? { status: data.status } : {}),
         ...(data.dueDate !== undefined ? { dueDate: data.dueDate ? new Date(data.dueDate) : null } : {}),
+        ...(data.notifyAssigneesDirectly !== undefined ? { notifyAssigneesDirectly: Boolean(data.notifyAssigneesDirectly) } : {}),
         ...(isCompleting ? {
           completedAt: new Date(),
           completionNote: data.completionNote?.trim() || 'Admin tarafından tamamlandı',

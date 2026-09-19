@@ -166,3 +166,41 @@ test('saveMessage rejects status and broadcast messages', async () => {
   assert.equal(result, null);
 });
 
+test('contactResolver.resolveDirectChatId returns c.us for valid phone and resolves mapped LID', async () => {
+  const { contactResolver } = await import('../server/services/contact-resolver.service');
+  
+  // 1. Valid phone number
+  const c1 = { id: '905332760534@s.whatsapp.net', phoneNumber: '905332760534' };
+  assert.equal(contactResolver.resolveDirectChatId(c1), '905332760534@c.us');
+
+  // 2. Mapped LID
+  contactResolver.addMapping('999999999999@lid', '905551234567@s.whatsapp.net');
+  const c2 = { id: '999999999999@lid', phoneNumber: null };
+  assert.equal(contactResolver.resolveDirectChatId(c2), '905551234567@c.us');
+
+  // 3. Bare LID without phone or mapping returns null
+  const c3 = { id: '888888888888@lid', phoneNumber: null };
+  assert.equal(contactResolver.resolveDirectChatId(c3), null);
+});
+
+test('taskPayload formats TASK_CREATED_DM with group name and personal heading', async () => {
+  const { taskPayload } = await import('../server/services/delivery.service');
+  const mockTask = {
+    id: 'task-dm-1',
+    title: 'Özel Görev Testi',
+    description: 'Açıklama',
+    priority: 'HIGH',
+    dueDate: new Date('2026-10-01T00:00:00Z'),
+    chat: { name: 'Pazarlama Ekibi' },
+    assignees: [{ contact: { id: '905332760534@s.whatsapp.net', displayName: 'Muzaffer', phoneNumber: '905332760534' } }],
+    sourceMessage: { body: 'Orijinal mesaj' }
+  };
+  const payload = taskPayload(mockTask, 'TASK_CREATED_DM', { groupName: 'Pazarlama Ekibi' });
+  assert.ok(payload.text.includes('📌 *Adınıza Yeni Görev Tanımlandı*'));
+  assert.ok(payload.text.includes('Pazarlama Ekibi'));
+  assert.ok(payload.text.includes('Özel Görev Testi'));
+  assert.ok(payload.text.includes('Kaynak mesaj: Orijinal mesaj'));
+  assert.deepEqual(payload.mentions, []);
+  assert.equal(payload.linkPreview, false);
+});
+

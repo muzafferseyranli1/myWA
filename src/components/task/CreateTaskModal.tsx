@@ -41,6 +41,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
   const [dueDate, setDueDate] = useState('');
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [notifyOnCreate, setNotifyOnCreate] = useState(true);
+  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(false);
   const [searchContact, setSearchContact] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -70,7 +71,8 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
           priority,
           dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
           assigneeIds,
-          notifyOnCreate
+          notifyOnCreate,
+          notifyAssigneesDirectly
         })
       });
       if (res.ok) {
@@ -201,10 +203,17 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
               </div>
             </div>
 
-            <label className="flex items-center space-x-2 cursor-pointer pt-2">
-              <input type="checkbox" checked={notifyOnCreate} onChange={e => setNotifyOnCreate(e.target.checked)} className="accent-[#00A884] h-4 w-4" />
-              <span className="text-sm text-[#111b21]">WhatsApp&apos;ta bildir</span>
-            </label>
+            <div className="space-y-2 pt-2 border-t border-[#e9edef]">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" checked={notifyOnCreate} onChange={e => setNotifyOnCreate(e.target.checked)} className="accent-[#00A884] h-4 w-4" />
+                <span className="text-sm text-[#111b21]">WhatsApp grubunda bildir</span>
+              </label>
+
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" checked={notifyAssigneesDirectly} onChange={e => setNotifyAssigneesDirectly(e.target.checked)} className="accent-[#00A884] h-4 w-4" />
+                <span className="text-sm text-[#111b21]">Görevlilere özel mesaj da gönder (DM)</span>
+              </label>
+            </div>
 
           </form>
         </div>

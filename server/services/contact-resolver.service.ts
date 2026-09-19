@@ -360,6 +360,56 @@ export class ContactResolverService {
     }
     return result;
   }
+
+  /**
+   * Bir contact nesnesinden doğrudan WhatsApp DM gönderimi yapılabilecek chatId (xxx@c.us) üretir.
+   * Telefon numarası veya telefon JID'si bulunamazsa (yalnızca çözümlenemeyen LID ise) null döner.
+   */
+  public resolveDirectChatId(contact?: {
+    id: string;
+    phoneNumber?: string | null;
+    lidId?: string | null;
+  } | null): string | null {
+    if (!contact?.id) return null;
+
+    // 1. contact.phoneNumber varsa ve geçerli bir telefon numarası ise
+    if (contact.phoneNumber) {
+      const clean = contact.phoneNumber.replace(/\D/g, '');
+      if (!this.isLid(clean) && clean.length >= 10 && clean.length <= 15) {
+        return `${clean}@c.us`;
+      }
+    }
+
+    // 2. contact.id doğrudan bir telefon JID'si ise (@s.whatsapp.net veya @c.us)
+    if (!contact.id.endsWith('@lid') && (contact.id.endsWith('@s.whatsapp.net') || contact.id.endsWith('@c.us'))) {
+      const clean = contact.id.split('@')[0].replace(/\D/g, '');
+      if (!this.isLid(clean) && clean.length >= 10 && clean.length <= 15) {
+        return `${clean}@c.us`;
+      }
+    }
+
+    // 3. contact.id bir LID ise ve lidToJidMap eşlemesinde telefon JID'si varsa
+    const mentionJid = this.resolveToMentionJid(contact.id);
+    if (mentionJid && !mentionJid.endsWith('@lid')) {
+      const clean = mentionJid.split('@')[0].replace(/\D/g, '');
+      if (!this.isLid(clean) && clean.length >= 10 && clean.length <= 15) {
+        return `${clean}@c.us`;
+      }
+    }
+
+    // 4. contact.lidId üzerinden eşleşme kontrolü
+    if (contact.lidId) {
+      const lidMentionJid = this.resolveToMentionJid(contact.lidId);
+      if (lidMentionJid && !lidMentionJid.endsWith('@lid')) {
+        const clean = lidMentionJid.split('@')[0].replace(/\D/g, '');
+        if (!this.isLid(clean) && clean.length >= 10 && clean.length <= 15) {
+          return `${clean}@c.us`;
+        }
+      }
+    }
+
+    return null;
+  }
 }
 
 export const contactResolver = ContactResolverService.getInstance();
