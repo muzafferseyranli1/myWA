@@ -43,9 +43,9 @@ export function taskPayload(
     text = `📌 *Yeni Görev*\n\n*${cleanTitle}*\n`;
     if (cleanDescription) text += `${cleanDescription}\n`;
     text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
-    // If sourceMessageId exists, native WhatsApp reply_to will be used.
-    // Only append plain text if sourceMessageId is not present, but sourceMessage.body is.
-    if (!task.sourceMessageId && task.sourceMessage?.body) {
+    // Always include source message text so that if WAHA cannot quote natively (e.g. older message not in cache),
+    // the source message context is guaranteed never to be lost.
+    if (task.sourceMessage?.body) {
       const cleanSource = contactResolver.formatMentionsToNamesSync(task.sourceMessage.body);
       text += `\nKaynak mesaj: ${cleanSource}\n`;
     }

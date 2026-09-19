@@ -86,7 +86,7 @@ test('taskPayload formats TASK_REACTIVATED with reason, actor, and task link', a
   assert.ok(payload.text.includes('/t/task-456'));
 });
 
-test('taskPayload with sourceMessageId sets replyTo and omits plain text source message', async () => {
+test('taskPayload with sourceMessageId sets replyTo and guarantees source message text', async () => {
   const { taskPayload } = await import('../server/services/delivery.service');
   const mockTask = {
     id: 'task-789',
@@ -100,8 +100,9 @@ test('taskPayload with sourceMessageId sets replyTo and omits plain text source 
   };
   const payload = taskPayload(mockTask, 'TASK_CREATED');
   assert.equal(payload.replyTo, 'wamid.HBgLM...');
-  // Source message text is omitted because native WhatsApp quoted reply (reply_to) is active
-  assert.ok(!payload.text.includes('Kaynak mesaj:'));
+  // Source message text is always included so that if WAHA drops reply_to (e.g. older message not in cache),
+  // the source message is never lost.
+  assert.ok(payload.text.includes('Kaynak mesaj: Bu orijinal mesaj metnidir'));
   assert.ok(payload.text.includes('📌 *Yeni Görev*'));
   assert.ok(payload.text.includes('Kaynak Mesajlı Görev'));
 });
