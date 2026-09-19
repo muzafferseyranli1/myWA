@@ -85,3 +85,61 @@ test('taskPayload formats TASK_REACTIVATED with reason, actor, and task link', a
   assert.ok(payload.text.includes('Admin'));
   assert.ok(payload.text.includes('/t/task-456'));
 });
+
+test('taskPayload with sourceMessageId sets replyTo and omits plain text source message', async () => {
+  const { taskPayload } = await import('../server/services/delivery.service');
+  const mockTask = {
+    id: 'task-789',
+    title: 'Kaynak Mesajlı Görev',
+    description: 'Açıklama',
+    priority: 'MEDIUM',
+    dueDate: new Date('2026-10-01T00:00:00Z'),
+    assignees: [],
+    sourceMessageId: 'wamid.HBgLM...',
+    sourceMessage: { body: 'Bu orijinal mesaj metnidir' }
+  };
+  const payload = taskPayload(mockTask, 'TASK_CREATED');
+  assert.equal(payload.replyTo, 'wamid.HBgLM...');
+  // Source message text is omitted because native WhatsApp quoted reply (reply_to) is active
+  assert.ok(!payload.text.includes('Kaynak mesaj:'));
+  assert.ok(payload.text.includes('📌 *Yeni Görev*'));
+  assert.ok(payload.text.includes('Kaynak Mesajlı Görev'));
+});
+
+test('taskPayload without sourceMessageId appends plain text source message as fallback', async () => {
+  const { taskPayload } = await import('../server/services/delivery.service');
+  const mockTask = {
+    id: 'task-999',
+    title: 'Fallback Görev',
+    priority: 'LOW',
+    assignees: [],
+    sourceMessageId: null,
+    sourceMessage: { body: 'Orijinal mesaj içeriği' }
+  };
+  const payload = taskPayload(mockTask, 'TASK_CREATED');
+  assert.equal(payload.replyTo, undefined);
+  assert.ok(payload.text.includes('Kaynak mesaj: Orijinal mesaj içeriği'));
+});
+
+test('contactResolver generates LID mention tag and JID for contacts without phone number', async () => {
+  const { contactResolver } = await import('../server/services/contact-resolver.service');
+  const lidContact = {
+    id: '107017851170822@lid',
+    displayName: 'Gamze Vardar',
+    pushName: 'Gamze Vardar',
+    phoneNumber: null
+  };
+  const resolved = contactResolver.resolveAssigneeMention(lidContact);
+  assert.equal(resolved.tag, '@107017851170822');
+  assert.equal(resolved.jid, '107017851170822@lid');
+});
+
+test('contactResolver replaces raw mention numbers with display names in text', async () => {
+  const { contactResolver } = await import('../server/services/contact-resolver.service');
+  contactResolver.cacheContactName('152875250503933@lid', 'Ahmet Hocaoglu');
+  contactResolver.cacheContactName('279044109123751@lid', 'Ömer Albayrak');
+  const text = '@152875250503933 ve @279044109123751 görevlendirildi';
+  const cleaned = contactResolver.formatMentionsToNamesSync(text);
+  assert.equal(cleaned, '@Ahmet Hocaoglu ve @Ömer Albayrak görevlendirildi');
+});
+

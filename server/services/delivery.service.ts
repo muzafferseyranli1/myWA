@@ -35,36 +35,44 @@ export function taskPayload(
   const date = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' }) : 'Belirtilmedi';
   const taskUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
 
+  const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
+  const cleanDescription = task.description ? contactResolver.formatMentionsToNamesSync(task.description) : '';
+
   let text = '';
   if (kind === 'TASK_CREATED') {
-    text = `📌 *Yeni Görev*\n\n*${task.title}*\n`;
-    if (task.description) text += `${task.description}\n`;
+    text = `📌 *Yeni Görev*\n\n*${cleanTitle}*\n`;
+    if (cleanDescription) text += `${cleanDescription}\n`;
     text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
-    if (task.sourceMessage?.body) text += `\nKaynak mesaj: ${task.sourceMessage.body}\n`;
+    // If sourceMessageId exists, native WhatsApp reply_to will be used.
+    // Only append plain text if sourceMessageId is not present, but sourceMessage.body is.
+    if (!task.sourceMessageId && task.sourceMessage?.body) {
+      const cleanSource = contactResolver.formatMentionsToNamesSync(task.sourceMessage.body);
+      text += `\nKaynak mesaj: ${cleanSource}\n`;
+    }
     text += `\n🔗 Görevi incele: ${taskUrl}`;
-    return { text, mentions: [...new Set(mentions)], url: taskUrl };
+    return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined };
   }
 
   if (kind === 'TASK_COMPLETED') {
-    text = `✅ *Görev Tamamlandı!*\n\n*${task.title}*\n`;
-    if (task.description) text += `${task.description}\n`;
+    text = `✅ *Görev Tamamlandı!*\n\n*${cleanTitle}*\n`;
+    if (cleanDescription) text += `${cleanDescription}\n`;
     text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
     if (task.completionNote) text += `\n📝 *Kapanış notu:* ${task.completionNote}\n`;
     if (task.completedBy) text += `✍️ *Kapatan:* ${task.completedBy}\n`;
     // Kullanıcı kuralı: Görev tamamlandı bildirimine link koyulmaz
-    return { text: text.trim(), mentions: [...new Set(mentions)] };
+    return { text: text.trim(), mentions: [...new Set(mentions)], replyTo: task.sourceMessageId || undefined };
   }
 
   if (kind === 'TASK_REACTIVATED') {
-    text = `🔄 *Görev Tekrar Aktifleştirildi!*\n\n*${task.title}*\n`;
-    if (task.description) text += `${task.description}\n`;
+    text = `🔄 *Görev Tekrar Aktifleştirildi!*\n\n*${cleanTitle}*\n`;
+    if (cleanDescription) text += `${cleanDescription}\n`;
     text += `Öncelik: ${task.priority}\n📅 *Yeni Bitiş:* ${date}\n👥 *Görevliler:* ${tags}\n✍️ *Aktifleştiren:* ${extra?.by || 'Yönetici'}\n`;
     if (extra?.reason) text += `\n📝 *Aktifleştirme Nedeni:*\n"${extra.reason}"\n`;
     text += `\n🔗 Görevi incele: ${taskUrl}`;
-    return { text, mentions: [...new Set(mentions)], url: taskUrl };
+    return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined };
   }
 
-  return { text: task.title, mentions: [] };
+  return { text: cleanTitle, mentions: [] };
 }
 export async function acceptEvent(body: any) {
   const key = eventKey(body);
@@ -145,7 +153,7 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
   }
 }
 
-async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[] } | null> {
+async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string } | null> {
   const payload = job.payload as any;
   if (job.kind === 'REMINDER') {
     if (payload.day && payload.day !== istanbulDay()) return null;
@@ -172,7 +180,7 @@ async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: st
       text = text.replace(payload.url, shortLink);
     }
   }
-  return { text, mentions: payload.mentions || [] };
+  return { text, mentions: payload.mentions || [], replyTo: payload.replyTo || undefined };
 }
 
 export async function processOutbox() {
@@ -213,7 +221,7 @@ export async function processOutbox() {
         status = 'PENDING';
       } else {
       sending = true;
-      const response = await wahaService.sendMessage(job.chatId, rendered.text, rendered.mentions);
+      const response = await wahaService.sendMessage(job.chatId, rendered.text, rendered.mentions, rendered.replyTo);
       providerId = typeof response?.id === 'string' ? response.id : undefined;
       }
     }

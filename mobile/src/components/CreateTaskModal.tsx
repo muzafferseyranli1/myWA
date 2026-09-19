@@ -24,6 +24,25 @@ interface CreateTaskModalProps {
   contacts?: ContactItem[];
 }
 
+function replaceMentionsWithNames(
+  text: string,
+  contactList: ContactItem[]
+): string {
+  if (!text) return '';
+  return text.replace(/@(\d{9,16})/g, (match, num) => {
+    const contact = contactList.find(c => {
+      const p = c.phoneNumber?.replace(/\D/g, '') || '';
+      const cId = c.id?.replace(/@.*$/, '') || '';
+      return p === num || cId === num;
+    });
+    if (contact) {
+      const name = contact.displayName || contact.pushName;
+      if (name) return `@${name}`;
+    }
+    return match;
+  });
+}
+
 export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   visible,
   onClose,
@@ -34,8 +53,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const requestId = useRef<string | null>(null);
-  const [title, setTitle] = useState(sourceMessage?.body ? sourceMessage.body.slice(0, 80) : '');
-  const [description, setDescription] = useState(sourceMessage?.body || '');
+
+  const getInitialTexts = () => {
+    if (!sourceMessage?.body) return { title: '', description: '' };
+    const cleaned = replaceMentionsWithNames(sourceMessage.body, contacts);
+    return {
+      title: cleaned.slice(0, 80),
+      description: cleaned,
+    };
+  };
+
+  const initial = getInitialTexts();
+  const [title, setTitle] = useState(initial.title);
+  const [description, setDescription] = useState(initial.description);
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
   const [daysDue, setDaysDue] = useState<number | null>(3);
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
@@ -64,8 +94,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   };
 
   useEffect(() => {
-    if (visible) { requestId.current = null; setTitle(sourceMessage?.body?.slice(0,80) || ''); setDescription(sourceMessage?.body || ''); }
-  }, [visible, sourceMessage?.id]);
+    if (visible) {
+      requestId.current = null;
+      const texts = getInitialTexts();
+      setTitle(texts.title);
+      setDescription(texts.description);
+    }
+  }, [visible, sourceMessage?.id, contacts]);
 
   const handleSave = async () => {
     if (!title.trim()) return;

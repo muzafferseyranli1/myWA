@@ -164,19 +164,19 @@ export class ContactResolverService {
 
   /**
    * Bir contact ID'yi mention için kullanılabilir gerçek JID'e çevir
-   * @returns JID formatında ID (xxx@s.whatsapp.net) veya null
+   * @returns JID formatında ID (xxx@s.whatsapp.net veya xxx@lid) veya null
    */
   public resolveToMentionJid(contactId: string): string | null {
     if (!contactId) return null;
 
-    // LID ise cache'den gerçek JID'e çevir
+    // LID ise cache'den gerçek telefon JID'ine çevir, bulunamazsa LID'in kendisi WhatsApp için geçerli mention JID'sidir
     if (contactId.endsWith('@lid') || this.isLid(contactId)) {
       const fullLid = contactId.endsWith('@lid') ? contactId : `${contactId}@lid`;
-      const jid = this.lidToJidMap.get(fullLid) || this.lidToJidMap.get(contactId.split('@')[0]);
-      if (jid && jid.endsWith('@s.whatsapp.net') && !this.isLid(jid.split('@')[0])) {
-        return jid;
+      const mapped = this.lidToJidMap.get(fullLid) || this.lidToJidMap.get(contactId.split('@')[0]);
+      if (mapped && mapped.endsWith('@s.whatsapp.net') && !this.isLid(mapped.split('@')[0])) {
+        return mapped;
       }
-      return null;
+      return fullLid;
     }
 
     // Zaten @s.whatsapp.net formatındaysa (ve sahte LID jid değilse) direkt kullan
@@ -185,12 +185,17 @@ export class ContactResolverService {
       if (!this.isLid(raw)) {
         return contactId;
       }
-      return null;
+      return `${raw}@lid`;
     }
 
     // Sadece numara ise ve LID değilse @s.whatsapp.net ekle
     if (/^\d{10,13}$/.test(contactId) && !this.isLid(contactId)) {
       return `${contactId}@s.whatsapp.net`;
+    }
+
+    // 14-16 haneli LID ise @lid ekle
+    if (/^\d{14,16}$/.test(contactId)) {
+      return `${contactId}@lid`;
     }
 
     return null;
@@ -277,21 +282,23 @@ export class ContactResolverService {
 
   /**
    * Bir contact için etiketleme tag'i (@xxx) ve JID bilgisini çözümler.
-   * - Gerçek telefon numarası biliniyorsa WhatsApp bildirimi için @telefon_numarasi ve jid döndürür.
-   * - Sadece LID biliniyorsa ve telefon yoksa ASLA sahte numara üretmez, @İsim ve jid: null döndürür.
+   * - Gerçek telefon numarası biliniyorsa WhatsApp bildirimi için @telefon_numarasi ve telefon JID döndürür.
+   * - Sadece LID biliniyorsa WhatsApp grup bildirimleri için @lid_numarasi ve LID JID (<num>@lid) döndürür.
+   *   WhatsApp bunu @~İsim olarak render eder ve ilgili kişiye bildirim iletir.
    */
   public resolveAssigneeMention(contact: {
     id: string;
     phoneNumber?: string | null;
     displayName?: string | null;
     pushName?: string | null;
+    lidId?: string | null;
   }): { tag: string; jid: string | null } {
     let jid = this.resolveToMentionJid(contact.id);
 
-    // Telefon numarası varsa ve LID değilse JID üret
-    if (!jid && contact.phoneNumber) {
+    // Telefon numarası varsa ve LID değilse telefon JID'sini öncelikli kullan
+    if ((!jid || jid.endsWith('@lid')) && contact.phoneNumber) {
       const cleanPhone = contact.phoneNumber.replace(/\D/g, '');
-      const isLidNum = this.isLid(contact.id) || this.isLid(cleanPhone) || cleanPhone === contact.id.split('@')[0];
+      const isLidNum = this.isLid(cleanPhone) || cleanPhone.length > 13;
       if (!isLidNum && cleanPhone.length >= 10 && cleanPhone.length <= 13) {
         jid = `${cleanPhone}@s.whatsapp.net`;
         if (contact.id.endsWith('@lid')) {
@@ -300,13 +307,36 @@ export class ContactResolverService {
       }
     }
 
+    // Eğer hala jid yoksa ama lidId varsa kontrol et
+    if (!jid && contact.lidId) {
+      jid = this.resolveToMentionJid(contact.lidId);
+    }
+
     if (jid) {
       return { tag: `@${jid.split('@')[0]}`, jid };
     }
 
-    // Telefon/JID bulunamayan LID kullanıcıları için doğrudan temiz @İsim kullan
+    // Telefon veya LID bulunamayan kullanıcılar için doğrudan temiz @İsim kullan
     const name = contact.displayName || contact.pushName || this.getDisplayNameSync(contact.id);
     return { tag: name ? `@${name.trim()}` : '@Görevli', jid: null };
+  }
+
+  /**
+   * Senkron olarak metin içerisindeki ham LID veya telefon mention'larını (@123456789) okunabilir isimlere (@İsim) çevirir.
+   */
+  public formatMentionsToNamesSync(text: string): string {
+    if (!text) return text;
+    const mentionRegex = /@(\d{9,16})/g;
+    if (!mentionRegex.test(text)) return text;
+
+    mentionRegex.lastIndex = 0;
+    return text.replace(mentionRegex, (match, rawNumber) => {
+      const name = this.getDisplayNameSync(rawNumber);
+      if (name && name !== rawNumber && !name.includes('@')) {
+        return `@${name.trim()}`;
+      }
+      return match;
+    });
   }
 
   /**

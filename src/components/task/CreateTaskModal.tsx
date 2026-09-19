@@ -13,9 +13,29 @@ interface CreateTaskModalProps {
   onTaskCreated?: () => void;
 }
 
+function replaceMentionsWithNames(
+  text: string,
+  contactList: Array<{ id: string; phoneNumber?: string; pushName?: string; displayName?: string }>
+): string {
+  if (!text) return '';
+  return text.replace(/@(\d{9,16})/g, (match, num) => {
+    const contact = contactList.find(c => {
+      const p = c.phoneNumber?.replace(/\D/g, '') || '';
+      const cId = c.id?.replace(/@.*$/, '') || '';
+      return p === num || cId === num;
+    });
+    if (contact) {
+      const name = contact.displayName || contact.pushName;
+      if (name) return `@${name}`;
+    }
+    return match;
+  });
+}
+
 export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage, contacts, onTaskCreated }: CreateTaskModalProps) {
   const requestId = useRef<string | undefined>(undefined);
-  const [title, setTitle] = useState(sourceMessage?.body?.substring(0, 60) || '');
+  const initialTitle = sourceMessage?.body ? replaceMentionsWithNames(sourceMessage.body, contacts || []).substring(0, 80) : '';
+  const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
   const [dueDate, setDueDate] = useState('');
@@ -101,7 +121,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
                   <span className="font-semibold text-[#00A884] text-xs">{sourceMessage.senderName}</span>
                   <span className="text-xs text-[#667781]">{new Date(sourceMessage.timestamp).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
                 </div>
-                <div className="text-[#D1D7DB] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto text-[13px] leading-relaxed">{sourceMessage.body}</div>
+                <div className="text-[#111b21] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto text-[13px] leading-relaxed">{replaceMentionsWithNames(sourceMessage.body, contacts || [])}</div>
               </div>
             </div>
           )}

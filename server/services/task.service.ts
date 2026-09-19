@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
 import { enqueue, taskPayload, notificationView } from './delivery.service';
+import { contactResolver } from './contact-resolver.service';
 
 const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true };
 async function attachNotification<T extends { id: string }>(task: T) {
@@ -46,8 +47,10 @@ export const taskService = {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${requestKey}, 0))`;
       const existing = await tx.task.findUnique({ where: { requestKey }, include });
       if (existing) return existing;
+      const cleanTitle = contactResolver.formatMentionsToNamesSync(data.title.trim());
+      const cleanDesc = data.description ? contactResolver.formatMentionsToNamesSync(data.description) : null;
       const created = await tx.task.create({ data: {
-        requestKey, title: data.title.trim(), description: data.description || null, chatId: data.chatId,
+        requestKey, title: cleanTitle, description: cleanDesc, chatId: data.chatId,
         sourceMessageId: data.sourceMessageId || null, priority: data.priority || 'MEDIUM',
         dueDate: data.dueDate ? new Date(data.dueDate) : null, createdBy: data.createdBy || null,
         notifyOnCreate: data.notifyOnCreate !== false,
@@ -72,8 +75,8 @@ export const taskService = {
       const isReactivating = previous.status === 'DONE' && data.status && data.status !== 'DONE';
 
       const updated = await tx.task.update({ where: { id }, data: {
-        ...(data.title !== undefined ? { title: data.title.trim() } : {}),
-        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.title !== undefined ? { title: contactResolver.formatMentionsToNamesSync(data.title.trim()) } : {}),
+        ...(data.description !== undefined ? { description: data.description ? contactResolver.formatMentionsToNamesSync(data.description) : null } : {}),
         ...(data.priority !== undefined ? { priority: data.priority } : {}),
         ...(data.status !== undefined ? { status: data.status } : {}),
         ...(data.dueDate !== undefined ? { dueDate: data.dueDate ? new Date(data.dueDate) : null } : {}),

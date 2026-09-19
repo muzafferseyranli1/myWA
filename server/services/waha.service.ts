@@ -115,12 +115,35 @@ export class WAHAService {
       }
     } catch (error) { this.setStatus('disconnected'); throw error; }
   }
-  public async sendMessage(chatId: string, text: string, mentions?: string[]): Promise<any> {
+  public async sendMessage(chatId: string, text: string, mentions?: string[], replyTo?: string): Promise<any> {
     const normalize = (id: string) => id.replace('@s.whatsapp.net', '@c.us');
-    const response = await this.request(`${this.baseUrl}/api/sendText`, {
-      method: 'POST', body: JSON.stringify({ session: this.sessionName, chatId: normalize(chatId), text, mentions: mentions?.map(normalize) }),
-    });
-    return response.json();
+    const body: any = {
+      session: this.sessionName,
+      chatId: normalize(chatId),
+      text,
+      mentions: mentions?.map(normalize),
+    };
+    if (replyTo) {
+      body.reply_to = replyTo;
+    }
+    try {
+      const response = await this.request(`${this.baseUrl}/api/sendText`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      return await response.json();
+    } catch (err: any) {
+      if (replyTo) {
+        console.warn(`[WAHA] sendMessage with reply_to=${replyTo} failed (${err?.message || err}). Retrying without reply_to...`);
+        delete body.reply_to;
+        const retry = await this.request(`${this.baseUrl}/api/sendText`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        return await retry.json();
+      }
+      throw err;
+    }
   }
   public async getHistory(offset: number, from: number, until: number) {
     const query = new URLSearchParams({ limit: '100', offset: String(offset), downloadMedia: 'false', 'filter.timestamp.gte': String(from), 'filter.timestamp.lte': String(until) });
