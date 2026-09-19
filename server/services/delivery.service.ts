@@ -155,8 +155,11 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
     if (result?.message) {
       const msg = result.message;
       events.emit('new_message', msg);
-      if (msg.mediaUrl && msg.messageType !== 'TEXT') {
-        void mediaService.downloadMedia(msg.id).catch(err => {
+      if (['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER'].includes(msg.messageType)) {
+        void mediaService.downloadMedia(msg.id).then(async () => {
+          const fresh = await prisma.message.findUnique({ where: { id: msg.id } });
+          if (fresh) events.emit('message_updated', fresh);
+        }).catch(err => {
           console.warn(`[EagerMedia] Could not eagerly download media for ${msg.id}:`, err?.message || err);
         });
       }

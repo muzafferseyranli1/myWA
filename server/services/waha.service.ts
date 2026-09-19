@@ -37,11 +37,28 @@ export class WAHAService {
     catch { return false; }
   }
   public async ensureSession(): Promise<any> {
-    try { return await (await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000)).json(); }
-    catch (error) {
+    try {
+      const session = await (await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000)).json();
+      if (!session.config?.noweb?.store?.enabled) {
+        await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: this.sessionName,
+            config: {
+              ...session.config,
+              noweb: {
+                ...session.config?.noweb,
+                store: { enabled: true, fullSync: false }
+              }
+            }
+          })
+        }).catch(err => console.warn('[WAHA] Could not update session store config:', err?.message || err));
+      }
+      return session;
+    } catch (error) {
       if (!(error instanceof WAHAHttpError) || error.status !== 404) throw error;
       // Global webhook configuration in Compose is the sole source of truth.
-      return (await this.request(`${this.baseUrl}/api/sessions`, { method: 'POST', body: JSON.stringify({ name: this.sessionName, start: false, config: { noweb: { store: { enabled: true, fullSync: true } } } }) })).json();
+      return (await this.request(`${this.baseUrl}/api/sessions`, { method: 'POST', body: JSON.stringify({ name: this.sessionName, start: false, config: { noweb: { store: { enabled: true, fullSync: false } } } }) })).json();
     }
   }
   public async updateStatus() {
@@ -153,7 +170,7 @@ export class WAHAService {
     return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/overview?limit=100&offset=${offset}`, {}, 15000)).json();
   }
   public async getMessage(chatId: string, id: string) {
-    return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/${encodeURIComponent(chatId.replace('@s.whatsapp.net','@c.us'))}/messages/${encodeURIComponent(id)}?downloadMedia=true`, {}, 15000)).json();
+    return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/${encodeURIComponent(chatId.replace('@s.whatsapp.net','@c.us'))}/messages/${encodeURIComponent(id)}?downloadMedia=true`, {}, 30000)).json();
   }
   public async syncAllGroups(): Promise<void> {
     try {

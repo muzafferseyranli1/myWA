@@ -98,18 +98,25 @@ export class MediaService {
     }
 
     if (!response?.ok) {
-      const restored = await wahaService.getMessage(message.chatId, id);
-      if (!restored.media?.url) throw new Error('Provider media unavailable');
-      const url = providerFileUrl(restored.media.url);
-      message = await prisma.message.update({
-        where: { id },
-        data: {
-          mediaUrl: restored.media.url,
-          mediaMime: restored.media.mimetype || message.mediaMime,
-          mediaName: restored.media.filename || message.mediaName
+      try {
+        const restored = await wahaService.getMessage(message.chatId, id);
+        if (!restored?.media?.url) {
+          throw new Error(`Provider media unavailable: ${JSON.stringify(restored?.media || restored)}`);
         }
-      });
-      response = await fetch(url, { headers, redirect: 'error', signal: AbortSignal.timeout(60000) });
+        const url = providerFileUrl(restored.media.url);
+        message = await prisma.message.update({
+          where: { id },
+          data: {
+            mediaUrl: restored.media.url,
+            mediaMime: restored.media.mimetype || message.mediaMime,
+            mediaName: restored.media.filename || message.mediaName
+          }
+        });
+        response = await fetch(url, { headers, redirect: 'error', signal: AbortSignal.timeout(60000) });
+      } catch (fallbackErr: any) {
+        console.warn(`[MediaService] Fallback getMessage failed for ${id}:`, fallbackErr?.message || fallbackErr);
+        throw fallbackErr;
+      }
     }
 
     if (!response.ok || !response.body || Number(response.headers.get('content-length')) > MAX) {

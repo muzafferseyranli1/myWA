@@ -15,5 +15,5 @@ export function providerFileUrl(value: string, base = process.env.WAHA_API_URL |
   const url = new URL(value, base);
   const path = decodeURIComponent(url.pathname);
   if (!path.startsWith('/api/files/') || path.includes('..') || /[\\\x00-\x1f]/.test(path)) throw new Error('Invalid provider media path');
-  return new URL(url.pathname, base).href;
+  return new URL(url.pathname + url.search, base).href;
 }
