@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { wahaService } from './waha.service';
 import { acceptEvent } from './delivery.service';
-import {parseMessage} from '../lib/reliability';
+import { parseMessage, isStatusOrBroadcast } from '../lib/reliability';
 import { events } from '../lib/events';
 let discoveryOffset = 0;
 export async function syncHistory() {
@@ -15,8 +15,15 @@ export async function syncHistory() {
     // Persist each page before advancing its durable cursor. Replaying an
     // interrupted page shares the same message keys as live webhooks.
     for (const payload of messages) {
+      const from = payload.from || '';
+      const to = payload.to || '';
+      const chatId = payload.chatId || '';
+      if (isStatusOrBroadcast(from) || isStatusOrBroadcast(to) || isStatusOrBroadcast(chatId)) {
+        continue;
+      }
       await acceptEvent({ session, event: 'message.any', payload });
       const data=parseMessage(payload);
+      if (isStatusOrBroadcast(data.chatId)) continue;
       if(data.preview)await prisma.message.updateMany({where:{id:payload.id},data:{preview:data.preview}});
       if (Number.isInteger(payload.ack)) await prisma.message.updateMany({ where: { id: payload.id, OR: [{ack: null},{ack:{lt:payload.ack}}] }, data: { ack: payload.ack } });
     }
@@ -26,6 +33,7 @@ export async function syncHistory() {
     if (!Array.isArray(chats)) throw new Error('Unexpected chat response');
     for (const chat of chats) {
       if (typeof chat.id !== 'string' || !chat.id.includes('@')) continue;
+      if (isStatusOrBroadcast(chat.id)) continue;
       const current = await prisma.chat.findUnique({where:{id:chat.id}});
       const timestamp = chat.lastMessage?.timestamp ? new Date(Number(chat.lastMessage.timestamp)*1000) : current?.updatedAt || new Date(0);
       await prisma.chat.upsert({where:{id:chat.id},create:{id:chat.id,name:chat.name || chat.id.split('@')[0],isGroup:chat.id.endsWith('@g.us'),avatarUrl:chat.picture || null,updatedAt:timestamp},update:{ ...(chat.name ? {name:chat.name}:{}), ...(chat.picture ? {avatarUrl:chat.picture}:{}), updatedAt:current && current.updatedAt > timestamp ? current.updatedAt : timestamp}});

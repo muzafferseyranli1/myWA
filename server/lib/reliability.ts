@@ -17,6 +17,11 @@ export function eventKey(event: any): string {
   return `${event.session}:event:${event.id || createHash('sha256').update(JSON.stringify(event)).digest('hex')}`;
 }
 
+export function isStatusOrBroadcast(idOrChatId?: string | null): boolean {
+  if (!idOrChatId || typeof idOrChatId !== 'string') return false;
+  return idOrChatId === 'status@broadcast' || idOrChatId.endsWith('@broadcast');
+}
+
 export function parseMessage(payload: any) {
   const chatId = payload.fromMe ? (payload.to || payload.from) : payload.from;
   if (typeof payload.id !== 'string' || typeof chatId !== 'string' || !chatId.includes('@')) throw new Error('Invalid message');

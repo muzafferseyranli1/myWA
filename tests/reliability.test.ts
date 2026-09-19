@@ -143,3 +143,25 @@ test('contactResolver replaces raw mention numbers with display names in text', 
   assert.equal(cleaned, '@Ahmet Hocaoglu ve @Ömer Albayrak görevlendirildi');
 });
 
+test('isStatusOrBroadcast correctly detects status updates and broadcast chats', async () => {
+  const { isStatusOrBroadcast } = await import('../server/lib/reliability');
+  assert.equal(isStatusOrBroadcast('status@broadcast'), true);
+  assert.equal(isStatusOrBroadcast('12345@broadcast'), true);
+  assert.equal(isStatusOrBroadcast('905332760534@c.us'), false);
+  assert.equal(isStatusOrBroadcast('120363025@g.us'), false);
+  assert.equal(isStatusOrBroadcast('107017851170822@lid'), false);
+  assert.equal(isStatusOrBroadcast(undefined), false);
+  assert.equal(isStatusOrBroadcast(null), false);
+});
+
+test('saveMessage rejects status and broadcast messages', async () => {
+  const { messageService } = await import('../server/services/message.service');
+  const result = await messageService.saveMessage({
+    id: 'broadcast-msg-1',
+    chatId: 'status@broadcast',
+    body: 'Status update text',
+    timestamp: new Date()
+  });
+  assert.equal(result, null);
+});
+

@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import type { Prisma, MessageType } from '@prisma/client';
 import { contactResolver } from './contact-resolver.service';
 import { mediaView } from '../lib/media';
+import { isStatusOrBroadcast } from '../lib/reliability';
 
 export const messageService = {
   async saveMessage(data: any, db: Prisma.TransactionClient = prisma) {
@@ -9,6 +10,10 @@ export const messageService = {
       id, chatId, chatName, isGroup, senderId, senderPhone, senderName,
       body, quotedText, quotedSender, messageType, mediaUrl, mediaName, mediaMime, isFromMe, timestamp, ack, preview
     } = data;
+
+    if (!chatId || isStatusOrBroadcast(chatId)) {
+      return null;
+    }
 
     // Only update chat name if it's provided and not a fallback JID or if current chat name is numeric/ID
     const existingChat = await db.chat.findUnique({ where: { id: chatId } });
@@ -131,6 +136,9 @@ export const messageService = {
   },
 
   async getMessagesByChat(chatId: string, page: number = 1, limit: number = 100, before?: string) {
+    if (isStatusOrBroadcast(chatId)) {
+      return { messages: [], total: 0, page, limit, hasMore: false };
+    }
     const skip = (page - 1) * limit;
     const cursor = before ? await prisma.message.findFirst({where:{id:before,chatId}}) : null;
     if (before && !cursor) throw new Error('Invalid message cursor');

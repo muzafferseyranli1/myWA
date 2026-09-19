@@ -28,7 +28,7 @@ export const ChatListScreen = () => {
   const fetchChats = useCallback(async () => {
     try {
       const data = await chatsApi.getChats();
-      setChats(data);
+      setChats(Array.isArray(data) ? data.filter((c: ChatItem) => c.id !== 'status@broadcast' && !c.id.endsWith('@broadcast')) : []);
     } catch (err) {
       console.error('Fetch chats error:', err);
     } finally {
@@ -58,6 +58,8 @@ export const ChatListScreen = () => {
   };
 
   const filteredChats = chats.filter((c) =>
+    c.id !== 'status@broadcast' &&
+    !c.id.endsWith('@broadcast') &&
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 

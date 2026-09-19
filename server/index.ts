@@ -26,7 +26,32 @@ const app = next({ dev: process.env.NODE_ENV !== 'production' });
 const handle = app.getRequestHandler();
 const origins = process.env.ALLOWED_ORIGIN || '*';
 const allowed = origins === '*' ? '*' : origins.split(',').map(o => o.trim());
+async function cleanupBroadcastData() {
+  try {
+    await prisma.$executeRaw`
+      DELETE FROM message_reads WHERE message_id IN (
+        SELECT id FROM messages WHERE chat_id = 'status@broadcast' OR chat_id LIKE '%@broadcast'
+      )
+    `;
+    await prisma.$executeRaw`
+      DELETE FROM message_reactions WHERE message_id IN (
+        SELECT id FROM messages WHERE chat_id = 'status@broadcast' OR chat_id LIKE '%@broadcast'
+      )
+    `;
+    await prisma.$executeRaw`
+      DELETE FROM messages WHERE chat_id = 'status@broadcast' OR chat_id LIKE '%@broadcast'
+    `;
+    await prisma.$executeRaw`
+      DELETE FROM chats WHERE id = 'status@broadcast' OR id LIKE '%@broadcast'
+    `;
+    console.log('> [Cleanup] Broadcast and status messages/chats purged.');
+  } catch (err: any) {
+    console.warn('[Cleanup] Broadcast cleanup warning:', err?.message || err);
+  }
+}
+
 app.prepare().then(async () => {
+  await cleanupBroadcastData();
   const server = express();
   const httpServer = http.createServer(server);
   const io = new Server(httpServer, { cors: { origin: allowed, methods: ['GET', 'POST'] } });

@@ -172,7 +172,7 @@ export class WAHAService {
 
       for (const g of groups) {
         const jid = g.id || g.jid;
-        if (!jid) continue;
+        if (!jid || jid === 'status@broadcast' || jid.endsWith('@broadcast')) continue;
 
         const subject = g.subject || g.name || jid;
 

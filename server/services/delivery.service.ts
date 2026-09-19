@@ -7,7 +7,7 @@ import { messageService } from './message.service';
 import { contactResolver } from './contact-resolver.service';
 import { urlShortenerService } from './url-shortener.service';
 import { mediaService } from './media.service';
-import { classifySendError, eventKey, istanbulDay, parseMessage, reminderDue, retryDelay } from '../lib/reliability';
+import { classifySendError, eventKey, istanbulDay, parseMessage, reminderDue, retryDelay, isStatusOrBroadcast } from '../lib/reliability';
 
 type DB = Prisma.TransactionClient;
 export const notificationView = (job: OutgoingJob) => ({
@@ -101,7 +101,18 @@ export async function processInbox() {
       let message = null;
       let updatedMessage = null;
       if (['message', 'message.any'].includes(body.event)) {
+        const rawFrom = body.payload?.from;
+        const rawTo = body.payload?.to;
+        const rawChatId = body.payload?.chatId;
+        if (isStatusOrBroadcast(rawFrom) || isStatusOrBroadcast(rawTo) || isStatusOrBroadcast(rawChatId)) {
+          await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lockedUntil: null, lockToken: null, lastError: null } });
+          return null;
+        }
         const data = parseMessage(body.payload);
+        if (isStatusOrBroadcast(data.chatId)) {
+          await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lockedUntil: null, lockToken: null, lastError: null } });
+          return null;
+        }
         const existing = await tx.message.findUnique({ where: { id: data.id } });
         if (!existing) message = await messageService.saveMessage(data, tx);
       }
@@ -115,12 +126,16 @@ export async function processInbox() {
  if(!Number.isInteger(p.ack)||p.ack < -1||p.ack>4) throw new Error('Invalid ACK');
  await tx.message.updateMany({where:{id:p.id,OR:[{ack:null},{ack:{lt:p.ack}}]},data:{ack:p.ack}});
  updatedMessage=await tx.message.findUnique({where:{id:p.id}});
- if(!updatedMessage) throw new Error('ACK message not stored yet');
+ if(!updatedMessage) {
+   // If message wasn't stored (e.g. status/broadcast or pruned), complete event without failure
+   await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lockedUntil: null, lockToken: null, lastError: null } });
+   return null;
+ }
 }
 if(body.event==='message.edited'||body.event==='message.revoked') {
  const p=body.payload.after||body.payload;
  const messageId=p.id||body.payload.before?.id;
- updatedMessage=await tx.message.update({where:{id:messageId},data:body.event==='message.revoked'?{revoked:true,body:'',mediaUrl:null}:{body:p.body||'',editedAt:new Date()}});
+ updatedMessage=await tx.message.update({where:{id:messageId},data:body.event==='message.revoked'?{revoked:true,body:'',mediaUrl:null}:{body:p.body||'',editedAt:new Date()}}).catch(() => null);
 }
 if(body.event==='message.reaction') {
  const p=body.payload, senderId=p.fromMe?'me':p.participant||p.from;
@@ -128,7 +143,11 @@ if(body.event==='message.reaction') {
  const previous=await tx.messageReaction.findUnique({where:{messageId_senderId:{messageId:p.reaction.messageId,senderId}}});
  if(!previous||previous.timestamp<=timestamp) await tx.messageReaction.upsert({where:{messageId_senderId:{messageId:p.reaction.messageId,senderId}},create:{messageId:p.reaction.messageId,senderId,text:p.reaction.text,timestamp},update:{text:p.reaction.text,timestamp}});
  updatedMessage=await tx.message.findUnique({where:{id:p.reaction.messageId}});
- if(!updatedMessage) throw new Error('Reaction message not stored yet');
+ if(!updatedMessage) {
+   // If reaction is for status or broadcast message not stored in DB, do not throw
+   await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lockedUntil: null, lockToken: null, lastError: null } });
+   return null;
+ }
 }
 await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lockedUntil: null, lockToken: null, lastError: null } });
       return { message, updatedMessage, statusEvent: body.event === 'session.status' || body.event === 'state.change' };

@@ -8,8 +8,17 @@ const router=Router();
 router.use(requireAuth);
 router.get('/',async(req,res)=>{
  try{
-  const chats=await prisma.chat.findMany({orderBy:{updatedAt:'desc'},include:{_count:{select:{tasks:true}},messages:{orderBy:[{timestamp:'desc'},{id:'desc'}],take:1}}});
-  const counts=await prisma.$queryRaw<{chat_id:string;count:bigint}[]>`SELECT m.chat_id,COUNT(*) AS count FROM messages m LEFT JOIN message_reads r ON r.message_id=m.id AND r.user_id=${(req as any).user.id} WHERE m.is_from_me=false AND m.revoked=false AND r.message_id IS NULL GROUP BY m.chat_id`;
+  const chats=await prisma.chat.findMany({
+    where: {
+      AND: [
+        { id: { not: 'status@broadcast' } },
+        { id: { not: { endsWith: '@broadcast' } } }
+      ]
+    },
+    orderBy:{updatedAt:'desc'},
+    include:{_count:{select:{tasks:true}},messages:{orderBy:[{timestamp:'desc'},{id:'desc'}],take:1}}
+  });
+  const counts=await prisma.$queryRaw<{chat_id:string;count:bigint}[]>`SELECT m.chat_id,COUNT(*) AS count FROM messages m LEFT JOIN message_reads r ON r.message_id=m.id AND r.user_id=${(req as any).user.id} WHERE m.is_from_me=false AND m.revoked=false AND m.chat_id != 'status@broadcast' AND m.chat_id NOT LIKE '%@broadcast' AND r.message_id IS NULL GROUP BY m.chat_id`;
   const unread=new Map(counts.map(row=>[row.chat_id,Number(row.count)]));
   res.json(chats.map(chat=>{
    const {messages,...rest}=chat;
@@ -21,8 +30,12 @@ router.get('/',async(req,res)=>{
 });
 router.get('/:chatId/messages',async(req,res)=>{
  try{
+  const chatId = req.params.chatId as string;
+  if (chatId === 'status@broadcast' || chatId.endsWith('@broadcast')) {
+    return res.json({ messages: [], total: 0, page: 1, limit: 50, hasMore: false });
+  }
   const page=Math.max(1,parseInt(req.query.page as string)||1),limit=Math.max(1,Math.min(100,parseInt(req.query.limit as string)||50));
-  const result=await messageService.getMessagesByChat(req.params.chatId as string,page,limit,typeof req.query.before==='string'?req.query.before:undefined);
+  const result=await messageService.getMessagesByChat(chatId,page,limit,typeof req.query.before==='string'?req.query.before:undefined);
   const reactions=await prisma.messageReaction.findMany({where:{messageId:{in:result.messages.map(m=>m.id)}}});
   res.json({...result,messages:result.messages.map(m=>({...m,reactions:reactions.filter(r=>r.messageId===m.id)}))});
  }catch{res.status(500).json({error:'Mesajlar alınamadı.'});}

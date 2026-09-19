@@ -19,7 +19,7 @@ export default function ChatDashboard(){
  const [status,setStatus]=useState('disconnected'),[qr,setQr]=useState(''),[myJid,setMyJid]=useState(''),[showQr,setShowQr]=useState(false),[showTasks,setShowTasks]=useState(false),[showNotifications,setShowNotifications]=useState(false);
  const [socketOnline,setSocketOnline]=useState(false),[sync,setSync]=useState<any>(null),[hasMore,setHasMore]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[notice,setNotice]=useState<any>(null),[notificationHint,setNotificationHint]=useState(''),[bannerDismissed,setBannerDismissed]=useState(false);
  const fetchChats=useCallback(async()=>{
-  try {const res=await fetch('/api/chats',{headers:headers()});if(!res.ok)throw new Error('Sohbetler alınamadı.');const data=await res.json();setChats(data);chatRef.current=data;}catch(e:any){setError(e.message);}
+  try {const res=await fetch('/api/chats',{headers:headers()});if(!res.ok)throw new Error('Sohbetler alınamadı.');const data=await res.json();const filtered=Array.isArray(data)?data.filter((c:any)=>c.id!=='status@broadcast'&&!c.id.endsWith('@broadcast')):[];setChats(filtered);chatRef.current=filtered;}catch(e:any){setError(e.message);}
  },[]);
  const fetchStatus=useCallback(async()=>{
   try {const [wa,history]=await Promise.all([fetch('/api/whatsapp/status',{headers:headers()}),fetch('/api/whatsapp/sync',{headers:headers()})]);
