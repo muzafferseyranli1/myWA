@@ -50,7 +50,7 @@ export function taskPayload(
       text += `\nKaynak mesaj: ${cleanSource}\n`;
     }
     text += `\n🔗 Görevi incele: ${taskUrl}`;
-    return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined };
+    return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined, linkPreview: false };
   }
 
   if (kind === 'TASK_COMPLETED') {
@@ -60,7 +60,7 @@ export function taskPayload(
     if (task.completionNote) text += `\n📝 *Kapanış notu:* ${task.completionNote}\n`;
     if (task.completedBy) text += `✍️ *Kapatan:* ${task.completedBy}\n`;
     // Kullanıcı kuralı: Görev tamamlandı bildirimine link koyulmaz
-    return { text: text.trim(), mentions: [...new Set(mentions)], replyTo: task.sourceMessageId || undefined };
+    return { text: text.trim(), mentions: [...new Set(mentions)], replyTo: task.sourceMessageId || undefined, linkPreview: false };
   }
 
   if (kind === 'TASK_REACTIVATED') {
@@ -69,7 +69,7 @@ export function taskPayload(
     text += `Öncelik: ${task.priority}\n📅 *Yeni Bitiş:* ${date}\n👥 *Görevliler:* ${tags}\n✍️ *Aktifleştiren:* ${extra?.by || 'Yönetici'}\n`;
     if (extra?.reason) text += `\n📝 *Aktifleştirme Nedeni:*\n"${extra.reason}"\n`;
     text += `\n🔗 Görevi incele: ${taskUrl}`;
-    return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined };
+    return { text, mentions: [...new Set(mentions)], url: taskUrl, replyTo: task.sourceMessageId || undefined, linkPreview: false };
   }
 
   return { text: cleanTitle, mentions: [] };
@@ -175,7 +175,7 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
   }
 }
 
-async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string } | null> {
+async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string; linkPreview?: boolean } | null> {
   const payload = job.payload as any;
   if (job.kind === 'REMINDER') {
     if (payload.day && payload.day !== istanbulDay()) return null;
@@ -192,7 +192,7 @@ async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: st
       const shortLink = await urlShortenerService.shortenUrl(rawUrl);
       return `📋 *${task.title}*\n${tags}\n🔗 ${shortLink}`;
     }));
-    return { text: `🔔 *Görev Hatırlatması*\n\n${textList.join('\n\n')}`, mentions: [...mentions] };
+    return { text: `🔔 *Görev Hatırlatması*\n\n${textList.join('\n\n')}`, mentions: [...mentions], linkPreview: false };
   }
 
   let text = payload.text || '';
@@ -202,7 +202,7 @@ async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: st
       text = text.replace(payload.url, shortLink);
     }
   }
-  return { text, mentions: payload.mentions || [], replyTo: payload.replyTo || undefined };
+  return { text, mentions: payload.mentions || [], replyTo: payload.replyTo || undefined, linkPreview: payload.linkPreview ?? false };
 }
 
 export async function processOutbox() {
@@ -243,7 +243,7 @@ export async function processOutbox() {
         status = 'PENDING';
       } else {
       sending = true;
-      const response = await wahaService.sendMessage(job.chatId, rendered.text, rendered.mentions, rendered.replyTo);
+      const response = await wahaService.sendMessage(job.chatId, rendered.text, rendered.mentions, rendered.replyTo, rendered.linkPreview ?? false);
       providerId = typeof response?.id === 'string' ? response.id : undefined;
       }
     }

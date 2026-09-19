@@ -132,13 +132,20 @@ export class WAHAService {
       }
     } catch (error) { this.setStatus('disconnected'); throw error; }
   }
-  public async sendMessage(chatId: string, text: string, mentions?: string[], replyTo?: string): Promise<any> {
+  public async sendMessage(
+    chatId: string,
+    text: string,
+    mentions?: string[],
+    replyTo?: string,
+    linkPreview: boolean = false
+  ): Promise<any> {
     const normalize = (id: string) => id.replace('@s.whatsapp.net', '@c.us');
     const body: any = {
       session: this.sessionName,
       chatId: normalize(chatId),
       text,
       mentions: mentions?.map(normalize),
+      linkPreview,
     };
     if (replyTo) {
       body.reply_to = replyTo;
