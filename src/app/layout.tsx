@@ -3,7 +3,9 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'MyWA — WhatsApp Görev Yönetim Platformu',
-  description: 'WhatsApp-integrated Task Management Platform',
+  openGraph: {
+    title: 'MyWA — WhatsApp Görev Yönetim Platformu',
+  },
 };
 
 export default function RootLayout({
