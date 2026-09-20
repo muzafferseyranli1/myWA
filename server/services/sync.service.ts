@@ -3,7 +3,84 @@ import { wahaService } from './waha.service';
 import { acceptEvent } from './delivery.service';
 import { parseMessage, isStatusOrBroadcast } from '../lib/reliability';
 import { events } from '../lib/events';
+import { contactResolver } from './contact-resolver.service';
+
 let discoveryOffset = 0;
+const avatarCheckedMap = new Map<string, number>();
+
+/**
+ * Eksik profil resmi olan sohbetlerin avatarlarını arka planda WAHA'dan çeker
+ */
+async function syncMissingAvatars(): Promise<void> {
+  try {
+    const now = Date.now();
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+
+    const chatsWithoutAvatar = await prisma.chat.findMany({
+      where: {
+        avatarUrl: null,
+        AND: [
+          { id: { not: 'status@broadcast' } },
+          { id: { not: { endsWith: '@broadcast' } } }
+        ]
+      },
+      select: { id: true, isGroup: true },
+      take: 15,
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    let updatedCount = 0;
+    for (const chat of chatsWithoutAvatar) {
+      const lastChecked = avatarCheckedMap.get(chat.id);
+      if (lastChecked && now - lastChecked < twentyFourHours) {
+        continue;
+      }
+      avatarCheckedMap.set(chat.id, now);
+
+      let pictureUrl: string | null = null;
+
+      if (chat.isGroup) {
+        pictureUrl = await wahaService.getChatPicture(chat.id);
+      } else {
+        if (chat.id.endsWith('@lid')) {
+          const mentionJid = contactResolver.resolveToMentionJid(chat.id);
+          if (mentionJid && !mentionJid.endsWith('@lid')) {
+            pictureUrl = await wahaService.getChatPicture(mentionJid) ||
+                         await wahaService.getContactPicture(mentionJid);
+          }
+          if (!pictureUrl) {
+            pictureUrl = await wahaService.getChatPicture(chat.id);
+          }
+        } else {
+          pictureUrl = await wahaService.getChatPicture(chat.id) ||
+                       await wahaService.getContactPicture(chat.id);
+        }
+      }
+
+      if (pictureUrl) {
+        await prisma.chat.update({
+          where: { id: chat.id },
+          data: { avatarUrl: pictureUrl }
+        });
+        contactResolver.cacheAvatar(chat.id, pictureUrl);
+        await prisma.contact.updateMany({
+          where: { OR: [{ id: chat.id }, { lidId: chat.id }] },
+          data: { avatarUrl: pictureUrl }
+        }).catch(() => {});
+        updatedCount++;
+      }
+
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    if (updatedCount > 0) {
+      events.emit('chat_updated');
+    }
+  } catch (e: any) {
+    console.warn('[Sync] syncMissingAvatars notice:', e?.message || e);
+  }
+}
+
 export async function syncHistory() {
   if (!wahaService.isConnected()) return;
   const session = process.env.WAHA_SESSION_NAME || 'default';
@@ -34,12 +111,74 @@ export async function syncHistory() {
     for (const chat of chats) {
       if (typeof chat.id !== 'string' || !chat.id.includes('@')) continue;
       if (isStatusOrBroadcast(chat.id)) continue;
-      const current = await prisma.chat.findUnique({where:{id:chat.id}});
-      const timestamp = chat.lastMessage?.timestamp ? new Date(Number(chat.lastMessage.timestamp)*1000) : current?.updatedAt || new Date(0);
-      await prisma.chat.upsert({where:{id:chat.id},create:{id:chat.id,name:chat.name || chat.id.split('@')[0],isGroup:chat.id.endsWith('@g.us'),avatarUrl:chat.picture || null,updatedAt:timestamp},update:{ ...(chat.name ? {name:chat.name}:{}), ...(chat.picture ? {avatarUrl:chat.picture}:{}), updatedAt:current && current.updatedAt > timestamp ? current.updatedAt : timestamp}});
+
+      const isGroup = chat.id.endsWith('@g.us');
+      const timestamp = chat.lastMessage?.timestamp ? new Date(Number(chat.lastMessage.timestamp) * 1000) : new Date(0);
+
+      if (chat.picture) {
+        contactResolver.cacheAvatar(chat.id, chat.picture);
+      }
+
+      if (!isGroup) {
+        // 1-on-1 sohbet: İlgili kişinin veritabanında aktif bir LID sohbeti var mı kontrol et
+        const lidId = contactResolver.getLidByPhone(chat.id);
+        if (lidId) {
+          const lidChat = await prisma.chat.findUnique({ where: { id: lidId } });
+          if (lidChat) {
+            // Gerçek mesajların olduğu LID sohbeti mevcut!
+            // Profil resmini LID sohbetine ve kişisine aktar:
+            if (chat.picture && (!lidChat.avatarUrl || lidChat.avatarUrl !== chat.picture)) {
+              await prisma.chat.update({
+                where: { id: lidId },
+                data: { avatarUrl: chat.picture }
+              });
+              contactResolver.cacheAvatar(lidId, chat.picture);
+            }
+            if (chat.picture) {
+              await prisma.contact.updateMany({
+                where: { OR: [{ id: lidId }, { lidId }] },
+                data: { avatarUrl: chat.picture }
+              }).catch(() => {});
+            }
+
+            // Eğer DB'de mükerrer boş @c.us sohbet satırı kalmışsa birleştir ve sil:
+            const existingPhoneChat = await prisma.chat.findUnique({ where: { id: chat.id } });
+            if (existingPhoneChat) {
+              await prisma.message.updateMany({ where: { chatId: chat.id }, data: { chatId: lidId } });
+              await prisma.task.updateMany({ where: { chatId: chat.id }, data: { chatId: lidId } });
+              await prisma.outgoingJob.updateMany({ where: { chatId: chat.id }, data: { chatId: lidId } });
+              await prisma.chat.delete({ where: { id: chat.id } }).catch(() => {});
+            }
+
+            // Mükerrer @c.us sohbeti OLUŞTURMA!
+            continue;
+          }
+        }
+      }
+
+      const current = await prisma.chat.findUnique({ where: { id: chat.id } });
+      const effectiveTime = current && current.updatedAt > timestamp ? current.updatedAt : timestamp;
+      await prisma.chat.upsert({
+        where: { id: chat.id },
+        create: {
+          id: chat.id,
+          name: chat.name || chat.id.split('@')[0],
+          isGroup,
+          avatarUrl: chat.picture || null,
+          updatedAt: timestamp
+        },
+        update: {
+          ...(chat.name ? { name: chat.name } : {}),
+          ...(chat.picture ? { avatarUrl: chat.picture } : {}),
+          updatedAt: effectiveTime
+        }
+      });
     }
     discoveryOffset = chats.length ? discoveryOffset + 100 : 0;
     if (chats.length) events.emit('chat_updated');
+
+    // Eksik profil resimlerini arka planda WAHA'dan tamamla
+    await syncMissingAvatars();
   } catch (error: any) {
     if (error.status === 400 || error.status === 404 || error.status === 501) {
       // WAHA store is not enabled for this session; real-time messaging continues normally.

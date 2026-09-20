@@ -16,15 +16,33 @@ router.get('/',async(req,res)=>{
       ]
     },
     orderBy:{updatedAt:'desc'},
-    include:{_count:{select:{tasks:true}},messages:{orderBy:[{timestamp:'desc'},{id:'desc'}],take:1}}
+    include:{_count:{select:{tasks:true,messages:true}},messages:{orderBy:[{timestamp:'desc'},{id:'desc'}],take:1}}
   });
   const counts=await prisma.$queryRaw<{chat_id:string;count:bigint}[]>`SELECT m.chat_id,COUNT(*) AS count FROM messages m LEFT JOIN message_reads r ON r.message_id=m.id AND r.user_id=${(req as any).user.id} WHERE m.is_from_me=false AND m.revoked=false AND m.chat_id != 'status@broadcast' AND m.chat_id NOT LIKE '%@broadcast' AND r.message_id IS NULL GROUP BY m.chat_id`;
   const unread=new Map(counts.map(row=>[row.chat_id,Number(row.count)]));
-  res.json(chats.map(chat=>{
-   const {messages,...rest}=chat;
+
+  // Aktif LID sohbetlerinin kimlikleri (mesajı veya görevi olan)
+  const activeLidChatIds = new Set(
+    chats.filter(c => c.id.endsWith('@lid') && (c._count.messages > 0 || c._count.tasks > 0)).map(c => c.id)
+  );
+
+  // Mükerrer 0 mesajlı telefon sohbetlerini filtrele
+  const filteredChats = chats.filter(chat => {
+    if (!chat.isGroup && (chat.id.endsWith('@c.us') || chat.id.endsWith('@s.whatsapp.net')) && chat._count.messages === 0) {
+      const correspondingLid = contactResolver.getLidByPhone(chat.id);
+      if (correspondingLid && activeLidChatIds.has(correspondingLid)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  res.json(filteredChats.map(chat=>{
+   const {messages,_count,...rest}=chat;
    const resolved=contactResolver.getDisplayNameSync(chat.id);
    const name=!chat.isGroup&&resolved&&!resolved.includes('@')&&!/^\d+$/.test(resolved)?resolved:chat.name;
-   return {...rest,name,unreadCount:unread.get(chat.id)||0,lastMessage:messages[0]?{...messages[0],mediaUrl:null}:null};
+   const avatarUrl=chat.avatarUrl||contactResolver.getAvatarSync(chat.id)||null;
+   return {...rest,name,avatarUrl,unreadCount:unread.get(chat.id)||0,lastMessage:messages[0]?{...messages[0],mediaUrl:null}:null};
   }));
  }catch{res.status(500).json({error:'Sohbetler alınamadı.'});}
 });
@@ -101,7 +119,8 @@ router.get('/:chatId/contacts',async(req,res)=>{
   res.json(contacts.map(c=>{
    const mappedJid=c.id.endsWith('@lid')?contactResolver.resolveToMentionJid(c.id):null;
    const name=c.displayName||c.pushName||contactResolver.getDisplayNameSync(c.id);
-   return {...c,pushName:name||c.pushName,displayName:c.displayName||name,mappedJid,lidId:c.lidId||(c.id.endsWith('@lid')?c.id:null)};
+   const avatarUrl=c.avatarUrl||contactResolver.getAvatarSync(c.id)||null;
+   return {...c,pushName:name||c.pushName,displayName:c.displayName||name,mappedJid,lidId:c.lidId||(c.id.endsWith('@lid')?c.id:null),avatarUrl};
   }));
  }catch{res.status(500).json({error:'Kişiler alınamadı.'});}
 });

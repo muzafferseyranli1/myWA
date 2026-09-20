@@ -276,6 +276,48 @@ export class WAHAService {
       }
     } catch (e) {}
   }
+
+  /**
+   * Fetches profile picture URL for a chat (group or contact)
+   */
+  public async getChatPicture(chatId: string): Promise<string | null> {
+    try {
+      const normalized = chatId.replace('@s.whatsapp.net', '@c.us');
+      const res = await this.request(
+        `${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/${encodeURIComponent(normalized)}/picture`,
+        {},
+        8000
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.url || data?.picture || data?.profilePictureURL || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetches profile picture URL for a contact by phone number / JID
+   */
+  public async getContactPicture(contactId: string): Promise<string | null> {
+    try {
+      const normalized = contactId.replace('@s.whatsapp.net', '@c.us');
+      const query = new URLSearchParams({
+        contactId: normalized,
+        session: this.sessionName
+      });
+      const res = await this.request(
+        `${this.baseUrl}/api/contacts/profile-picture?${query}`,
+        {},
+        8000
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.profilePictureURL || data?.url || data?.picture || null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 export const wahaService = new WAHAService();

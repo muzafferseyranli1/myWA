@@ -9,8 +9,12 @@ export class ContactResolverService {
   private static instance: ContactResolverService;
   // In-memory LID → JID cache
   private lidToJidMap: Map<string, string> = new Map();
+  // In-memory Phone / JID → LID cache
+  private jidToLidMap: Map<string, string> = new Map();
   // In-memory identifier (JID/LID/Phone/raw) → Display Name cache
   private nameCache: Map<string, string> = new Map();
+  // In-memory identifier → Avatar URL cache
+  private avatarCache: Map<string, string> = new Map();
 
   private constructor() {}
 
@@ -40,11 +44,22 @@ export class ContactResolverService {
         for (const [id, contact] of Object.entries(sock.store.contacts as any)) {
           if (contact && (contact as any).lid) {
             this.lidToJidMap.set((contact as any).lid, id);
+            this.jidToLidMap.set(id, (contact as any).lid);
+            const rawPhone = id.split('@')[0].replace(/\D/g, '');
+            if (rawPhone && !this.isLid(rawPhone)) {
+              this.jidToLidMap.set(rawPhone, (contact as any).lid);
+              this.jidToLidMap.set(`${rawPhone}@c.us`, (contact as any).lid);
+              this.jidToLidMap.set(`${rawPhone}@s.whatsapp.net`, (contact as any).lid);
+            }
           }
           const name = (contact as any)?.name || (contact as any)?.notify || (contact as any)?.verifiedName;
           if (name) {
             this.nameCache.set(id, name);
             this.nameCache.set(id.split('@')[0], name);
+          }
+          const imgUrl = (contact as any)?.imgUrl || (contact as any)?.profilePictureURL;
+          if (imgUrl) {
+            this.cacheAvatar(id, imgUrl);
           }
         }
         console.log(`> ContactResolver: Loaded ${this.lidToJidMap.size} LID→JID mappings from store`);
@@ -55,12 +70,12 @@ export class ContactResolverService {
   }
 
   /**
-   * Veritabanından LID→JID ve İsim eşlemelerini yükle
+   * Veritabanından LID→JID, İsim ve Profil Resmi eşlemelerini yükle
    */
   public async loadFromDatabase() {
     try {
       const contacts = await prisma.contact.findMany({
-        select: { id: true, lidId: true, phoneNumber: true, pushName: true, displayName: true }
+        select: { id: true, lidId: true, phoneNumber: true, pushName: true, displayName: true, avatarUrl: true }
       });
       for (const c of contacts) {
         const isSelf = c.id.includes('905332760534') || c.id === '31933115404296@lid' || c.phoneNumber === '905332760534';
@@ -78,11 +93,31 @@ export class ContactResolverService {
           const rawId = c.id.split('@')[0];
           this.cacheContactName(rawId, name);
         }
+
+        const phone = c.phoneNumber ? c.phoneNumber.replace(/\D/g, '') : '';
         if (c.lidId) {
           this.lidToJidMap.set(c.lidId, c.id);
+          if (phone && !this.isLid(phone)) {
+            this.jidToLidMap.set(phone, c.lidId);
+            this.jidToLidMap.set(`${phone}@c.us`, c.lidId);
+            this.jidToLidMap.set(`${phone}@s.whatsapp.net`, c.lidId);
+          }
+          if (!c.id.endsWith('@lid')) {
+            this.jidToLidMap.set(c.id, c.lidId);
+            this.jidToLidMap.set(c.id.split('@')[0], c.lidId);
+          }
         }
-        if (c.phoneNumber && !this.isLid(c.phoneNumber) && c.id.endsWith('@lid')) {
-          this.lidToJidMap.set(c.id, `${c.phoneNumber}@s.whatsapp.net`);
+        if (phone && !this.isLid(phone) && c.id.endsWith('@lid')) {
+          this.lidToJidMap.set(c.id, `${phone}@s.whatsapp.net`);
+          this.jidToLidMap.set(phone, c.id);
+          this.jidToLidMap.set(`${phone}@c.us`, c.id);
+          this.jidToLidMap.set(`${phone}@s.whatsapp.net`, c.id);
+        }
+
+        if (c.avatarUrl) {
+          this.cacheAvatar(c.id, c.avatarUrl);
+          if (c.lidId) this.cacheAvatar(c.lidId, c.avatarUrl);
+          if (phone) this.cacheAvatar(phone, c.avatarUrl);
         }
       }
 
@@ -101,9 +136,26 @@ export class ContactResolverService {
           this.cacheContactName(lid.split('@')[0], bestName);
           this.cacheContactName(jid.split('@')[0], bestName);
         }
+
+        const avatar = this.getAvatarSync(lid) || this.getAvatarSync(jid);
+        if (avatar) {
+          this.cacheAvatar(lid, avatar);
+          this.cacheAvatar(jid, avatar);
+        }
       }
 
-      console.log(`> ContactResolver: Loaded ${contacts.length} contacts (${this.nameCache.size} name keys, ${this.lidToJidMap.size} mappings) from DB`);
+      // Sohbet tablosundaki avatarları da önbelleğe al
+      const chatsWithAvatars = await prisma.chat.findMany({
+        where: { avatarUrl: { not: null } },
+        select: { id: true, avatarUrl: true }
+      });
+      for (const chat of chatsWithAvatars) {
+        if (chat.avatarUrl) {
+          this.cacheAvatar(chat.id, chat.avatarUrl);
+        }
+      }
+
+      console.log(`> ContactResolver: Loaded ${contacts.length} contacts (${this.nameCache.size} names, ${this.lidToJidMap.size} mappings, ${this.avatarCache.size} avatars) from DB`);
     } catch (e) {
       console.error('ContactResolver loadFromDatabase error:', e);
     }
@@ -117,6 +169,60 @@ export class ContactResolverService {
   }
 
   /**
+   * Telefon numarası veya telefon JID'sinden karşılık gelen LID kimliğini bulur
+   */
+  public getLidByPhone(phoneOrJid: string): string | null {
+    if (!phoneOrJid) return null;
+    const clean = phoneOrJid.trim();
+    if (this.jidToLidMap.has(clean)) return this.jidToLidMap.get(clean)!;
+    const raw = clean.split('@')[0].replace(/\D/g, '');
+    if (this.jidToLidMap.has(raw)) return this.jidToLidMap.get(raw)!;
+    if (this.jidToLidMap.has(`${raw}@c.us`)) return this.jidToLidMap.get(`${raw}@c.us`)!;
+    if (this.jidToLidMap.has(`${raw}@s.whatsapp.net`)) return this.jidToLidMap.get(`${raw}@s.whatsapp.net`)!;
+    return null;
+  }
+
+  /**
+   * Senkron olarak önbellekten profil resmi URL'i döndürür
+   */
+  public getAvatarSync(key: string): string | null {
+    if (!key) return null;
+    const clean = key.trim();
+    if (this.avatarCache.has(clean)) return this.avatarCache.get(clean)!;
+    const raw = clean.split('@')[0];
+    if (this.avatarCache.has(raw)) return this.avatarCache.get(raw)!;
+
+    // Eşleşen LID veya JID üzerinden kontrol et
+    const mappedLid = this.getLidByPhone(clean);
+    if (mappedLid && this.avatarCache.has(mappedLid)) return this.avatarCache.get(mappedLid)!;
+
+    const mappedJid = this.lidToJidMap.get(clean) || this.lidToJidMap.get(`${raw}@lid`);
+    if (mappedJid && this.avatarCache.has(mappedJid)) return this.avatarCache.get(mappedJid)!;
+
+    return null;
+  }
+
+  /**
+   * Profil resmini önbelleğe kaydeder ve ilgili eşlemelere aktarır
+   */
+  public cacheAvatar(key: string, url: string) {
+    if (!key || !url) return;
+    this.avatarCache.set(key, url);
+    const raw = key.split('@')[0];
+    this.avatarCache.set(raw, url);
+
+    const mappedLid = this.jidToLidMap.get(key) || this.jidToLidMap.get(raw);
+    if (mappedLid) {
+      this.avatarCache.set(mappedLid, url);
+    }
+    const mappedJid = this.lidToJidMap.get(key) || this.lidToJidMap.get(`${raw}@lid`);
+    if (mappedJid) {
+      this.avatarCache.set(mappedJid, url);
+      this.avatarCache.set(mappedJid.split('@')[0], url);
+    }
+  }
+
+  /**
    * LID → JID eşlemesi ekle
    */
   public async addMapping(lid: string, jid: string) {
@@ -127,6 +233,13 @@ export class ContactResolverService {
     }
 
     this.lidToJidMap.set(lid, jid);
+    this.jidToLidMap.set(jid, lid);
+    const phone = jid.split('@')[0].replace(/\D/g, '');
+    if (phone && !this.isLid(phone)) {
+      this.jidToLidMap.set(phone, lid);
+      this.jidToLidMap.set(`${phone}@c.us`, lid);
+      this.jidToLidMap.set(`${phone}@s.whatsapp.net`, lid);
+    }
 
     // İsimleri çift yönlü aktar
     const name = this.getDisplayNameSync(lid) || this.getDisplayNameSync(jid);
@@ -135,28 +248,39 @@ export class ContactResolverService {
       this.cacheContactName(jid, name);
     }
 
+    // Avatarları çift yönlü aktar
+    const avatar = this.getAvatarSync(lid) || this.getAvatarSync(jid);
+    if (avatar) {
+      this.cacheAvatar(lid, avatar);
+      this.cacheAvatar(jid, avatar);
+    }
+
     // Veritabanında güncelle
     try {
       await prisma.contact.upsert({
         where: { id: jid },
         update: { 
           lidId: lid,
-          ...(name && { pushName: name, displayName: name })
+          ...(name && { pushName: name, displayName: name }),
+          ...(avatar && { avatarUrl: avatar })
         },
         create: { 
           id: jid, 
           lidId: lid, 
           phoneNumber: jid.split('@')[0],
           pushName: name || null,
-          displayName: name || null
+          displayName: name || null,
+          avatarUrl: avatar || null
         }
       });
 
-      const phone = jid.split('@')[0];
       if (phone && !this.isLid(phone)) {
         await prisma.contact.updateMany({
           where: { id: lid },
-          data: { phoneNumber: phone }
+          data: { 
+            phoneNumber: phone,
+            ...(avatar && { avatarUrl: avatar })
+          }
         });
       }
     } catch (e) {}
