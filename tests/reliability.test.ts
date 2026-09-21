@@ -204,3 +204,25 @@ test('taskPayload formats TASK_CREATED_DM with group name and personal heading',
   assert.equal(payload.linkPreview, false);
 });
 
+test('getDaysDiff and formatDateTR correctly compute relative days and Turkish date', async () => {
+  const { getDaysDiff, formatDateTR } = await import('../server/services/delivery.service');
+  const now = new Date('2026-09-21T09:00:00Z');
+
+  // Past: 2 days overdue
+  const past = new Date('2026-09-19T10:00:00Z');
+  assert.equal(getDaysDiff(past, now), -2);
+
+  // Today
+  const today = new Date('2026-09-21T15:00:00Z');
+  assert.equal(getDaysDiff(today, now), 0);
+
+  // Future: 3 days left
+  const future = new Date('2026-09-24T08:00:00Z');
+  assert.equal(getDaysDiff(future, now), 3);
+
+  // Turkish date
+  const formatted = formatDateTR(new Date('2026-09-21T00:00:00Z'));
+  assert.ok(formatted.includes('21') && formatted.includes('Eylül') && formatted.includes('2026'));
+});
+
+

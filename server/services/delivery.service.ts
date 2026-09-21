@@ -188,24 +188,107 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
   }
 }
 
-async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string; linkPreview?: boolean } | null> {
+export function getDaysDiff(targetDate: Date, nowDate = new Date()): number {
+  const fmt = (d: Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(d);
+  const d1 = new Date(fmt(targetDate) + 'T00:00:00Z');
+  const d2 = new Date(fmt(nowDate) + 'T00:00:00Z');
+  return Math.round((d1.getTime() - d2.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export function formatDateTR(date: Date): string {
+  return new Intl.DateTimeFormat('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  }).format(date);
+}
+
+export async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string; linkPreview?: boolean } | null> {
   const payload = job.payload as any;
   if (job.kind === 'REMINDER') {
     if (payload.day && payload.day !== istanbulDay()) return null;
-    const tasks = await prisma.task.findMany({ where: { id: { in: payload.taskIds }, status: { not: 'DONE' } }, include: { assignees: { include: { contact: true } } } });
+    const tasks = await prisma.task.findMany({
+      where: { id: { in: payload.taskIds }, status: { not: 'DONE' } },
+      include: { assignees: { include: { contact: true } } }
+    });
     if (!tasks.length) return null;
+
     const mentions = new Set<string>();
-    const textList = await Promise.all(tasks.map(async task => {
-      const tags = task.assignees.map(a => {
-        const resolved = contactResolver.resolveAssigneeMention(a.contact);
-        if (resolved.jid) mentions.add(resolved.jid);
-        return resolved.tag;
-      }).join(' ');
-      const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
-      const shortLink = await urlShortenerService.shortenUrl(rawUrl);
-      return `📋 *${task.title}*\n${tags}\n🔗 ${shortLink}`;
-    }));
-    return { text: `🔔 *Görev Hatırlatması*\n\n${textList.join('\n\n')}`, mentions: [...mentions], linkPreview: false };
+    const now = new Date();
+
+    const overdueTasks: typeof tasks = [];
+    const dueSoonTasks: typeof tasks = [];
+    const otherTasks: typeof tasks = [];
+
+    for (const task of tasks) {
+      if (task.dueDate) {
+        const diff = getDaysDiff(new Date(task.dueDate), now);
+        if (diff < 0) {
+          overdueTasks.push(task);
+        } else if (diff <= 3) {
+          dueSoonTasks.push(task);
+        } else {
+          otherTasks.push(task);
+        }
+      } else {
+        otherTasks.push(task);
+      }
+    }
+
+    const sections: string[] = [];
+
+    const formatSection = async (
+      title: string,
+      taskList: typeof tasks,
+      icon: string,
+      timeFormatter: (t: typeof tasks[0]) => string
+    ) => {
+      if (!taskList.length) return;
+      const lines = await Promise.all(taskList.map(async (task, idx) => {
+        const tags = task.assignees.map(a => {
+          const resolved = contactResolver.resolveAssigneeMention(a.contact);
+          if (resolved.jid) mentions.add(resolved.jid);
+          return resolved.tag;
+        }).filter(Boolean).join(' ');
+
+        const assigneeStr = tags ? ` — ${tags}` : '';
+        const timeBadge = timeFormatter(task);
+        const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
+        const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+        const shortLink = await urlShortenerService.shortenUrl(rawUrl);
+
+        return `${idx + 1}. ${icon} *${cleanTitle}*${assigneeStr} ${timeBadge}\n   🔗 ${shortLink}`;
+      }));
+      sections.push(`${title} (${taskList.length}):\n${lines.join('\n')}`);
+    };
+
+    // 1. Süresi Geçenler
+    await formatSection('🚨 *Süresi Geçenler*', overdueTasks, '❌', task => {
+      const diff = Math.abs(getDaysDiff(new Date(task.dueDate!), now));
+      return `(${diff} gündür gecikiyor!)`;
+    });
+
+    // 2. Yaklaşanlar
+    await formatSection('⏳ *Yaklaşanlar*', dueSoonTasks, '⚡', task => {
+      const diff = getDaysDiff(new Date(task.dueDate!), now);
+      return diff === 0 ? '(Bugün son gün!)' : `(${diff} gün kaldı)`;
+    });
+
+    // 3. Devam Edenler / Diğerleri
+    await formatSection('🔄 *Devam Edenler*', otherTasks, '🔧', task => {
+      if (task.dueDate) {
+        const diff = getDaysDiff(new Date(task.dueDate), now);
+        return `(${diff} gün kaldı)`;
+      }
+      return task.status === 'IN_PROGRESS' ? '(Devam ediyor)' : '(Aktif)';
+    });
+
+    const body = sections.join('\n\n');
+    const text = `📊 🗓️ *GÖREV DURUMU ÖZETİ*\n\n${body}\n\n📌 *Toplam:* ${tasks.length} aktif görev`;
+
+    return { text, mentions: [...mentions], linkPreview: false };
   }
 
   if (job.kind === 'REMINDER_DM') {
@@ -215,16 +298,44 @@ async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: st
       include: { chat: true }
     });
     if (!tasks.length) return null;
-    const recipient = payload.recipientName ? `Sn. *${payload.recipientName}*, ` : '';
-    const textList = await Promise.all(tasks.map(async task => {
-      const groupName = task.chat?.name || 'WhatsApp Grubu';
+
+    const now = new Date();
+    const recipient = payload.recipientName ? `@${payload.recipientName.trim().replace(/^@/, '')}` : 'Görevli';
+
+    const hasOverdue = tasks.some(t => t.dueDate && getDaysDiff(new Date(t.dueDate), now) < 0);
+    const headingNotice = hasOverdue
+      ? 'Süresi geçtiği halde tamamlanmayan görevleriniz bulunmaktadır:'
+      : 'Takip etmeniz gereken görevleriniz bulunmaktadır:';
+
+    const textList = await Promise.all(tasks.map(async (task, idx) => {
+      const groupName = task.chat?.name ? ` (${task.chat.name})` : '';
+      const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
       const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
       const shortLink = await urlShortenerService.shortenUrl(rawUrl);
-      const date = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' }) : 'Belirtilmedi';
-      return `📋 *${task.title}* (${groupName})\nBitiş: ${date}\n🔗 ${shortLink}`;
+
+      let timeBadge = '';
+      if (task.dueDate) {
+        const diff = getDaysDiff(new Date(task.dueDate), now);
+        if (diff < 0) {
+          timeBadge = `⏰ ${Math.abs(diff)} gündür gecikiyor!`;
+        } else if (diff === 0) {
+          timeBadge = '🚨 Bugün son gün!';
+        } else {
+          timeBadge = `⏳ ${diff} gün kaldı`;
+        }
+      } else {
+        timeBadge = '⏳ Tarih belirtilmedi';
+      }
+
+      const dateStr = task.dueDate ? formatDateTR(new Date(task.dueDate)) : 'Belirtilmedi';
+
+      return `${idx + 1}. 📋 *${cleanTitle}*${groupName}\n   🗓️ Bitiş: ${dateStr} | ${timeBadge}\n   🔗 Kapat: ${shortLink}`;
     }));
+
+    const text = `⚠️ Sayın *${recipient}*\n\n${headingNotice}\n\n${textList.join('\n\n')}\n\nLütfen en kısa sürede tamamlayın veya durum güncellemesi yapın.`;
+
     return {
-      text: `🔔 *Kişisel Görev Hatırlatması*\n\n${recipient}üzerinizde bekleyen görev(ler):\n\n${textList.join('\n\n')}`,
+      text,
       mentions: [],
       linkPreview: false
     };
