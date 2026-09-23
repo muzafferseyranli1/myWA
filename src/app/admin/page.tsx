@@ -6,6 +6,12 @@ import { ArrowLeft, UserPlus, KeyRound, Power, RefreshCw } from 'lucide-react';
 type AdminUser = { id: string; username: string; displayName: string; role: string; isActive: boolean; provisioned: boolean; whatsapp: string | null; createdAt: string };
 
 function headers() { return { Authorization: 'Bearer ' + localStorage.getItem('mywa_token'), 'Content-Type': 'application/json' }; }
+const USERNAME = /^[a-zA-Z0-9._-]{3,32}$/;
+// "Metin Yazıcı" -> "metin.yazici": usernames stay ASCII so they are easy to type at login.
+const toUsername = (name: string) => name.toLocaleLowerCase('tr')
+  .replace(/[çğıöşü]/g, c => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u' } as Record<string, string>)[c])
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, '.').replace(/[^a-z0-9._-]/g, '').replace(/\.{2,}/g, '.').replace(/^\.|\.$/g, '').slice(0, 32);
 const waLabel = (status: string | null) => status === 'connected' ? 'Bağlı' : status === 'qr' ? 'QR bekliyor' : status === 'connecting' ? 'Bağlanıyor' : status ? 'Bağlı değil' : '—';
 
 /**
@@ -21,6 +27,9 @@ export default function AdminPage() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ username: '', displayName: '', password: '' });
+  const [usernameEdited, setUsernameEdited] = useState(false);
+  const usernameError = form.username && !USERNAME.test(form.username) ? 'Boşluk ve Türkçe karakter olmadan 3-32 karakter: harf, rakam, nokta, tire, alt çizgi' : '';
+  const passwordError = form.password && form.password.length < 8 ? 'En az 8 karakter olmalı' : '';
 
   const load = useCallback(async () => {
     try {
@@ -53,13 +62,15 @@ export default function AdminPage() {
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (usernameError || passwordError) return;
     setBusy(true); setError(''); setNotice('');
     try {
       const res = await fetch('/api/admin/users', { method: 'POST', headers: headers(), body: JSON.stringify(form) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Kullanıcı oluşturulamadı');
-      setNotice(`${data.username} oluşturuldu. Giriş yapıp kendi WhatsApp'ını QR ile bağlayabilir.`);
+      setNotice(`${data.displayName} oluşturuldu. Kullanıcı adı: ${data.username}. Giriş yapıp kendi WhatsApp'ını bağlayabilir.`);
       setForm({ username: '', displayName: '', password: '' });
+      setUsernameEdited(false);
       await load();
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
@@ -89,11 +100,22 @@ export default function AdminPage() {
         <form onSubmit={create} className="rounded-xl border border-[#e9edef] bg-white p-4">
           <h2 className="mb-3 flex items-center gap-2 text-[14px] font-semibold"><UserPlus size={17} /> Yeni kullanıcı</h2>
           <div className="grid gap-3 sm:grid-cols-3">
-            <input className={input} placeholder="Kullanıcı adı" autoComplete="off" required value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
-            <input className={input} placeholder="Görünen ad" value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} />
-            <input className={input} placeholder="Şifre (en az 8)" type="password" autoComplete="new-password" required minLength={8} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+            <label className="block">
+              <span className="mb-1 block text-[12px] font-medium text-[#54656f]">Ad Soyad</span>
+              <input className={input} placeholder="Metin Yazıcı" autoComplete="off" value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value, username: usernameEdited ? form.username : toUsername(e.target.value) })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[12px] font-medium text-[#54656f]">Kullanıcı adı (girişte kullanılır)</span>
+              <input className={input + (usernameError ? ' border-red-400' : '')} placeholder="metin.yazici" autoComplete="off" autoCapitalize="none" spellCheck={false} required value={form.username} onChange={e => { setUsernameEdited(true); setForm({ ...form, username: e.target.value }); }} />
+              <span className={'mt-1 block text-[11px] ' + (usernameError ? 'text-red-600' : 'text-[#667781]')}>{usernameError || 'Boşluksuz; Türkçe karakter olmadan'}</span>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[12px] font-medium text-[#54656f]">Şifre</span>
+              <input className={input + (passwordError ? ' border-red-400' : '')} placeholder="En az 8 karakter" type="password" autoComplete="new-password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+              <span className={'mt-1 block text-[11px] ' + (passwordError ? 'text-red-600' : 'text-[#667781]')}>{passwordError || 'En az 8 karakter; yalnızca rakam da olur'}</span>
+            </label>
           </div>
-          <button disabled={busy} className="mt-3 rounded-lg bg-[#00a884] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-50">{busy ? 'Hazırlanıyor…' : 'Oluştur'}</button>
+          <button disabled={busy || !!usernameError || !!passwordError} className="mt-3 rounded-lg bg-[#00a884] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-50">{busy ? 'Hazırlanıyor…' : 'Oluştur'}</button>
         </form>
 
         <div className="overflow-x-auto rounded-xl border border-[#e9edef] bg-white">
