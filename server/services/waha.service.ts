@@ -4,6 +4,8 @@ import { contactResolver } from './contact-resolver.service';
 import { events } from '../lib/events';
 import { maybeTenant, tenantScoped, updateSelf } from '../lib/tenant';
 
+const WEBHOOK_EVENTS = ['message', 'message.any', 'session.status', 'message.ack', 'message.reaction', 'message.edited', 'message.revoked', 'call.received', 'call.accepted', 'call.rejected'];
+
 export class WAHAHttpError extends Error {
   constructor(public status: number) { super(`WAHA HTTP ${status}`); }
 }
@@ -50,29 +52,43 @@ export class WAHAService {
     try { await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000); return true; }
     catch { return false; }
   }
+  /**
+   * Each session carries its own webhook. WAHA has no global webhook in this
+   * deployment, so a session without one never delivers live messages.
+   */
+  private webhookConfig() {
+    const url = process.env.WAHA_WEBHOOK_URL || `${(process.env.APP_URL || '').replace(/\/+$/, '')}/api/whatsapp/webhook`;
+    return {
+      url,
+      events: WEBHOOK_EVENTS,
+      ...(process.env.WAHA_WEBHOOK_SECRET ? { hmac: { key: process.env.WAHA_WEBHOOK_SECRET } } : {}),
+      retries: { policy: 'exponential', delaySeconds: 2, attempts: 10 },
+    };
+  }
   public async ensureSession(): Promise<any> {
     try {
       const session = await (await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000)).json();
-      if (!session.config?.noweb?.store?.enabled) {
+      const needsStore = !session.config?.noweb?.store?.enabled;
+      const needsWebhook = !session.config?.webhooks?.length;
+      if (needsStore || needsWebhook) {
+        // Existing store settings are kept: changing them on a paired session can lose history.
         await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {
           method: 'PUT',
           body: JSON.stringify({
             name: this.sessionName,
             config: {
               ...session.config,
-              noweb: {
-                ...session.config?.noweb,
-                store: { enabled: true, fullSync: false }
-              }
+              ...(needsStore ? { noweb: { ...session.config?.noweb, store: { enabled: true, fullSync: false } } } : {}),
+              ...(needsWebhook ? { webhooks: [this.webhookConfig()] } : {}),
             }
           })
-        }).catch(err => console.warn('[WAHA] Could not update session store config:', err?.message || err));
+        }).catch(err => console.warn('[WAHA] Could not update session config:', err?.message || err));
       }
       return session;
     } catch (error) {
       if (!(error instanceof WAHAHttpError) || error.status !== 404) throw error;
-      // Global webhook configuration in Compose is the sole source of truth.
-      return (await this.request(`${this.baseUrl}/api/sessions`, { method: 'POST', body: JSON.stringify({ name: this.sessionName, start: false, config: { noweb: { store: { enabled: true, fullSync: false } } } }) })).json();
+      // New sessions request the full history from the phone when it is first linked.
+      return (await this.request(`${this.baseUrl}/api/sessions`, { method: 'POST', body: JSON.stringify({ name: this.sessionName, start: false, config: { noweb: { store: { enabled: true, fullSync: true } }, webhooks: [this.webhookConfig()] } }) })).json();
     }
   }
   public async updateStatus() {

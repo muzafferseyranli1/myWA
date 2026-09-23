@@ -52,7 +52,9 @@ export async function startWorkers() {
   }
   stopped = false; started = true;
   // Each iteration visits every tenant inside that tenant's own context.
-  loop('inbox', 250, () => forEachTenant(processInbox));
+  // Up to 25 events per tenant per tick, so a large history import drains quickly
+  // without starving the other tenants.
+  loop('inbox', 250, () => forEachTenant(async () => { for (let i = 0; i < 25 && await processInbox(); i++); }));
   loop('outbox', 1000, () => forEachTenant(processOutbox));
   loop('scheduler', 30000, () => forEachTenant(() => runScheduler()));
   loop('waha', 15000, () => forEachTenant(() => wahaService.reconcile()));

@@ -21,7 +21,7 @@ test('PostgreSQL reliability contracts', { skip: !process.env.TEST_DATABASE_URL,
   process.env.APP_URL = 'http://localhost:3060';
   let history:any[]=[];
   let state = 'WORKING', missing = false, httpError = 0, sendError = 0;
-  const calls: string[] = [], sent: any[] = [];
+  const calls: string[] = [], sent: any[] = [], configs: {method:string;body:any}[] = [];
   const mock = http.createServer(async (req,res) => {
     calls.push(req.url!); res.setHeader('Content-Type','application/json');
     assert.equal(req.headers['x-api-key'], 'integration-api');
@@ -35,6 +35,7 @@ if (req.url === '/api/sendText') {
     }
     if (req.url?.endsWith('/groups')) { res.end('[]'); return; }
     if (req.url?.includes('auth/qr')) { res.end(JSON.stringify({value:'test-qr'})); return; }
+    if ((req.url === '/api/sessions' && req.method==='POST') || req.method==='PUT') { let body=''; for await (const chunk of req) body+=chunk; configs.push({method:req.method!,body:JSON.parse(body)}); if (req.method==='PUT') { res.end('{}'); return; } }
     if (req.url === '/api/sessions' && req.method==='POST') { missing=false; state='STOPPED'; res.end(JSON.stringify({status:state})); return; }
     if (missing) { res.statusCode=404; res.end('{}'); return; }
     if (req.method==='POST') { if (req.url?.endsWith('/stop')) state='STOPPED'; res.end('{}'); return; }
@@ -107,7 +108,15 @@ if (req.url === '/api/sendText') {
       await wahaService.reconcile(); calls.length=0;
       await wahaService.reconcile(); assert.ok(!calls.some(c=>c.endsWith('/start')||c.endsWith('/restart')));
       state='STOPPED'; await wahaService.reconcile(); assert.ok(calls.some(c=>c.endsWith('/start')));
+      // Sessions without a webhook get one (WAHA has no global webhook here).
+      const update=configs.find(c=>c.method==='PUT')!;
+      assert.equal(update.body.config.webhooks[0].url,'http://localhost:3060/api/whatsapp/webhook');
+      assert.ok(update.body.config.webhooks[0].events.includes('message.any'));
+      assert.equal(update.body.config.webhooks[0].hmac.key,'integration-hmac');
       missing=true; calls.length=0; await wahaService.reconcile(); assert.ok(calls.includes('/api/sessions'));
+      // New sessions are created with their webhook and request the full history.
+      const created=configs.find(c=>c.method==='POST')!;
+      assert.equal(created.body.config.webhooks.length,1); assert.equal(created.body.config.noweb.store.fullSync,true);
       state='FAILED'; calls.length=0; await wahaService.reconcile(); await wahaService.reconcile(); assert.equal(calls.filter(c=>c.endsWith('/restart')).length,1);
       const clock=Date.now; let elapsed=0; Date.now=()=>clock()+elapsed;
       try { for(let i=0;i<5;i++){elapsed+=120000;await wahaService.reconcile();} assert.equal(calls.filter(c=>c.endsWith('/restart')).length,3); }

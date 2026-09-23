@@ -94,7 +94,8 @@ export async function acceptEvent(body: any) {
     VALUES (${randomUUID()},${key},${JSON.stringify(body)}::jsonb,NOW())
     ON CONFLICT (event_key) DO UPDATE SET event_key = EXCLUDED.event_key RETURNING id`;
 }
-export async function processInbox() {
+/** Processes one pending webhook event; resolves false when none was waiting. */
+export async function processInbox(): Promise<boolean> {
   const token = randomUUID();
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     WITH candidate AS (
@@ -104,7 +105,7 @@ export async function processInbox() {
     ) UPDATE incoming_events SET status = 'PROCESSING', attempts = attempts + 1,
       locked_until = NOW() + INTERVAL '60 seconds', lock_token = ${token}, updated_at = NOW()
       WHERE id IN (SELECT id FROM candidate) RETURNING id`;
-  if (!rows.length) return;
+  if (!rows.length) return false;
   const id = rows[0].id;
   try {
     const result = await prisma.$transaction(async tx => {
@@ -169,7 +170,9 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
     if (result?.message) {
       const msg = result.message;
       events.emit('new_message', msg);
-      if (['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER'].includes(msg.messageType)) {
+      // Recent media is fetched right away; older history media loads when opened.
+      const recent = Date.now() - new Date(msg.timestamp).getTime() < 86400000;
+      if (recent && ['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER'].includes(msg.messageType)) {
         void mediaService.downloadMedia(msg.id).then(async () => {
           const fresh = await prisma.message.findUnique({ where: { id: msg.id } });
           if (fresh) events.emit('message_updated', fresh);
@@ -187,6 +190,7 @@ await tx.incomingEvent.update({ where: { id }, data: { status: 'COMPLETED', lock
       nextAttemptAt: new Date(Date.now() + retryDelay(item?.attempts || 1)), lastError: String(error.message).slice(0, 500),
     } });
   }
+  return true;
 }
 
 export function getDaysDiff(targetDate: Date, nowDate = new Date()): number {
