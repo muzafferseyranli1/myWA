@@ -8,6 +8,9 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
   const [error, setError] = useState('');
   const [localQr, setLocalQr] = useState<string>(qrCode || '');
   const [localStatus, setLocalStatus] = useState<string>(status || 'disconnected');
+  const [phone, setPhone] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairing, setPairing] = useState(false);
 
   useEffect(() => {
     setLocalQr(qrCode || '');
@@ -74,12 +77,28 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
     }
   };
 
+  // A QR code cannot be scanned by the phone that is displaying it, so offer
+  // WhatsApp's "link with phone number" pairing code as well.
+  const requestPairingCode = async () => {
+    setPairing(true); setError(''); setPairingCode('');
+    try {
+      const res = await fetch('/api/whatsapp/pairing-code', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('mywa_token')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: phone })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Eşleştirme kodu alınamadı');
+      setPairingCode(data.code);
+    } catch (e: any) { setError(e.message); } finally { setPairing(false); }
+  };
+
   const activeQr = qrCode || localQr;
   const activeStatus = localStatus || status;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-lg bg-[#f0f2f5] border border-[#e9edef] flex flex-col p-6 text-center shadow-xl">
+      <div className="w-full max-w-sm max-h-[90dvh] overflow-y-auto rounded-lg bg-[#f0f2f5] border border-[#e9edef] flex flex-col p-5 sm:p-6 text-center shadow-xl">
         {error && <p role="alert" className="text-red-400">{error}</p>}
         <div className="flex justify-between items-start mb-4">
           <h2 className="text-lg font-medium text-[#111b21]">WhatsApp Bağlantısı</h2>
@@ -94,6 +113,17 @@ export default function QRConnectModal({ isOpen, onClose, qrCode, status }: any)
               <img src={activeQr} alt="WhatsApp QR Code" className="w-52 h-52 mb-4 bg-white p-2 rounded shadow-md" />
               <p className="text-sm font-semibold text-[#00A884]">QR Kodu WhatsApp ile Okutun</p>
               <p className="text-xs text-[#667781] mt-1">WhatsApp &gt; Bağlı Cihazlar &gt; Cihaz Bağla</p>
+              <div className="mt-4 w-full border-t border-[#e9edef] pt-4 text-left">
+                <p className="mb-2 text-xs text-[#667781]">Panel bağlayacağınız telefonda mı açık? QR yerine telefon numaranızla bağlanın:</p>
+                <div className="flex gap-2">
+                  <input type="tel" inputMode="numeric" autoComplete="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="905xxxxxxxxx" aria-label="Telefon numarası (ülke koduyla)" className="min-w-0 flex-1 rounded-md border border-[#d1d7db] px-3 py-2 text-sm outline-none focus:border-[#00A884]" />
+                  <button onClick={() => void requestPairingCode()} disabled={pairing || phone.replace(/\D/g, '').length < 10} className="shrink-0 rounded-md bg-[#00A884] px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{pairing ? 'Alınıyor…' : 'Kod al'}</button>
+                </div>
+                {pairingCode && <>
+                  <p className="mt-3 select-all text-center font-mono text-2xl font-semibold tracking-[0.2em] text-[#111b21]">{pairingCode}</p>
+                  <p className="mt-2 text-xs leading-5 text-[#667781]">WhatsApp &gt; Bağlı Cihazlar &gt; Cihaz Bağla &gt; <b>Bunun yerine telefon numarasıyla bağlan</b> adımından bu kodu girin.</p>
+                </>}
+              </div>
             </>
           ) : activeStatus === 'connected' || activeStatus === 'ready' ? (
             <>

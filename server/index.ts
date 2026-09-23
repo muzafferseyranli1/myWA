@@ -9,10 +9,11 @@ import whatsappRoutes from './routes/whatsapp';
 import whatsappWebhookRoutes from './routes/whatsapp-webhook';
 import notificationsRoutes from './routes/notifications';
 import mediaRoutes from './routes/media';
-import { setupSockets, broadcastNewMessage, broadcastWhatsAppStatus } from './sockets';
-import { whatsappService } from './services/whatsapp.service';
+import adminRoutes from './routes/admin';
+import { setupSockets } from './sockets';
+import { wahaService } from './services/waha.service';
 import { prisma } from './lib/prisma';
-import { events } from './lib/events';
+import { bootstrapLegacyTenant, forEachTenant, listTenants, runWithTenant, systemDb } from './lib/tenant';
 import { createUploadRouter } from './middleware/upload';
 import { startWorkers, stopWorkers, workersReady } from './services/workers';
 
@@ -51,7 +52,8 @@ async function cleanupBroadcastData() {
 }
 
 app.prepare().then(async () => {
-  await cleanupBroadcastData();
+  await bootstrapLegacyTenant();
+  await forEachTenant(cleanupBroadcastData).catch(() => {});
   const server = express();
   const httpServer = http.createServer(server);
   const io = new Server(httpServer, { cors: { origin: allowed, methods: ['GET', 'POST'] } });
@@ -77,19 +79,18 @@ app.prepare().then(async () => {
   server.use('/api/whatsapp', whatsappRoutes);
   server.use('/api/notifications', notificationsRoutes);
   server.use('/api/media', mediaRoutes);
+  server.use('/api/admin', adminRoutes);
   setupSockets(io);
-  events.on('new_message', broadcastNewMessage);
-  events.on('chat_updated', () => io.emit('chat_updated'));
-  events.on('message_updated', message => { io.to('chat_'+message.chatId).emit('message_updated', {id:message.id,chatId:message.chatId,body:message.body,ack:message.ack,revoked:message.revoked,editedAt:message.editedAt}); io.emit('chat_updated',message.chatId); });
-  whatsappService.onQR = () => broadcastWhatsAppStatus(whatsappService.getStatus());
-  whatsappService.onStatus = () => broadcastWhatsAppStatus(whatsappService.getStatus());
   await startWorkers();
   server.get('/ready', async (_req, res) => {
     try {
-      await prisma.$queryRaw`SELECT 1 FROM incoming_events LIMIT 1`;
-      await prisma.$queryRaw`SELECT 1 FROM outgoing_jobs LIMIT 1`;
+      await systemDb().$queryRaw`SELECT 1 FROM incoming_events LIMIT 1`;
+      await systemDb().$queryRaw`SELECT 1 FROM outgoing_jobs LIMIT 1`;
       const ready = workersReady();
-      res.status(ready ? 200 : 503).json({ status: ready ? (whatsappService.isConnected() ? 'ready' : 'degraded') : 'not_ready', database: 'ok', workers: ready, whatsapp: whatsappService.getStatus().status });
+      // Aggregate only: no per-user detail on this unauthenticated endpoint.
+      const tenants = listTenants();
+      const connected = tenants.filter(t => runWithTenant(t, () => wahaService.isConnected())).length;
+      res.status(ready ? 200 : 503).json({ status: ready ? (connected === tenants.length ? 'ready' : 'degraded') : 'not_ready', database: 'ok', workers: ready, whatsapp: { connected, total: tenants.length } });
     } catch { res.status(503).json({ status: 'not_ready', database: 'unavailable' }); }
   });
   server.all('*', (req, res) => handle(req, res));
@@ -101,7 +102,7 @@ app.prepare().then(async () => {
     httpServer.close();
     await stopWorkers();
     io.close();
-    await prisma.$disconnect();
+    await Promise.allSettled([...listTenants().map(t => t.db.$disconnect()), systemDb().$disconnect()]);
     clearTimeout(deadline);
     process.exit(0);
   };

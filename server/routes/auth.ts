@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authService } from '../services/auth.service';
 import { requireAuth } from '../middleware/auth';
-import { prisma } from '../lib/prisma';
+import { systemDb } from '../lib/tenant';
 
 const router = Router();
 
@@ -17,7 +17,7 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', requireAuth, async (req: any, res) => {
   try {
-    const user = await prisma.user.findUnique({
+    const user = await systemDb().user.findUnique({
       where: { id: req.user.id },
       select: { id: true, username: true, role: true, displayName: true }
     });

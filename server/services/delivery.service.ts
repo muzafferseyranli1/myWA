@@ -7,6 +7,7 @@ import { messageService } from './message.service';
 import { contactResolver } from './contact-resolver.service';
 import { urlShortenerService } from './url-shortener.service';
 import { mediaService } from './media.service';
+import { currentTenant } from '../lib/tenant';
 import { classifySendError, eventKey, istanbulDay, parseMessage, reminderDue, retryDelay, isStatusOrBroadcast } from '../lib/reliability';
 
 type DB = Prisma.TransactionClient;
@@ -360,7 +361,7 @@ export async function processOutbox() {
   if (!wahaService.isConnected()) return;
   const token = randomUUID();
   const job = await prisma.$transaction(async tx => {
-    const session = process.env.WAHA_SESSION_NAME || 'default';
+    const session = currentTenant().session;
     const gate = await tx.$queryRaw<{ session: string }[]>`UPDATE connection_preferences SET last_dispatch_at = NOW()
       WHERE session = ${session} AND enabled = true AND (last_dispatch_at IS NULL OR last_dispatch_at <= NOW() - INTERVAL '1 second') RETURNING session`;
     if (!gate.length) return null;
@@ -384,7 +385,7 @@ export async function processOutbox() {
       // A stalled preparation must not dispatch after another worker expired its lease.
       const owned = await prisma.outgoingJob.findFirst({ where: { id: job.id, status: 'PROCESSING', lockToken: token, lockedUntil: { gt: new Date(Date.now() + 20000) } } });
       if (!owned) return;
-      const preference = await prisma.connectionPreference.findUnique({ where: { session: process.env.WAHA_SESSION_NAME || 'default' } });
+      const preference = await prisma.connectionPreference.findUnique({ where: { session: currentTenant().session } });
       if (!preference?.enabled || !wahaService.isConnected()) {
         status = 'PENDING';
       } else {

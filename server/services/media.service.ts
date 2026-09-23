@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { prisma } from '../lib/prisma';
 import { providerFileUrl } from '../lib/media';
 import { wahaService } from './waha.service';
+import { currentTenant } from '../lib/tenant';
 
 const dir = resolve(process.env.MEDIA_DIR || './data/media');
 const pending = new Map<string, Promise<string>>();
@@ -29,6 +30,13 @@ async function reserve() {
   await usage;
   if (used + reserved + MAX > QUOTA) throw new Error('Media storage quota exceeded');
   reserved += MAX;
+}
+
+// The legacy tenant keeps its existing cache names; other tenants hash their
+// schema in, because two WhatsApp accounts in the same group see the same ids.
+function cacheName(id: string) {
+  const { schema } = currentTenant();
+  return createHash('sha256').update(schema === 'public' ? id : `${schema}:${id}`).digest('hex');
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -54,7 +62,7 @@ export class MediaService {
   }
 
   public async getLocalPath(id: string): Promise<string | null> {
-    const dest = join(dir, createHash('sha256').update(id).digest('hex'));
+    const dest = join(dir, cacheName(id));
     if (await exists(dest)) return dest;
     return null;
   }
@@ -64,19 +72,20 @@ export class MediaService {
    * If already downloaded, returns existing file path immediately.
    */
   public async downloadMedia(id: string): Promise<string> {
-    if (pending.has(id)) {
-      return pending.get(id)!;
+    const key = cacheName(id);
+    if (pending.has(key)) {
+      return pending.get(key)!;
     }
     const promise = this._download(id).finally(() => {
-      pending.delete(id);
+      pending.delete(key);
     });
-    pending.set(id, promise);
+    pending.set(key, promise);
     return promise;
   }
 
   private async _download(id: string): Promise<string> {
     await mkdir(dir, { recursive: true });
-    const dest = join(dir, createHash('sha256').update(id).digest('hex'));
+    const dest = join(dir, cacheName(id));
     if (await exists(dest)) return dest;
 
     let message = await prisma.message.findUniqueOrThrow({ where: { id } });

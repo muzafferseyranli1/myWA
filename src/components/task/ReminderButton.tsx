@@ -77,7 +77,7 @@ export default function ReminderButton({ type, taskId, chatId, onSuccess }: Remi
     <button
       onClick={handleClick}
       disabled={loading}
-      className={`flex items-center space-x-2 rounded-md border border-[#e9edef] bg-[#e9edef] px-3 py-1.5 hover:bg-[#374151] transition-colors ${loading ? 'opacity-50' : ''}`}
+      className={`flex items-center space-x-2 rounded-md border border-[#e9edef] bg-[#e9edef] px-3 py-1.5 hover:bg-[#dfe5e7] transition-colors ${loading ? 'opacity-50' : ''}`}
     >
       {type === 'overdue' ? <AlertCircle className="w-4 h-4 text-red-400" /> : <BarChart2 className="w-4 h-4 text-blue-400" />}
       <span className="text-sm font-medium text-[#111b21]">

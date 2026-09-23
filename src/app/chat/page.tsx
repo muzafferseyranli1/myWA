@@ -9,7 +9,7 @@ import QRConnectModal from '../../components/whatsapp/QRConnectModal';
 import NotificationsPanel from '../../components/NotificationsPanel';
 import ReminderButton from '../../components/task/ReminderButton';
 import { getSocket, disconnectSocket } from '../../lib/socket';
-import { LogOut, Smartphone, MessageCircle, LayoutDashboard, Bell, X, RefreshCw } from 'lucide-react';
+import { LogOut, Smartphone, MessageCircle, LayoutDashboard, Bell, X, RefreshCw, Users } from 'lucide-react';
 function headers(){return {Authorization:'Bearer '+localStorage.getItem('mywa_token')};}
 function merge(previous:any[],incoming:any[]){return [...new Map([...previous,...incoming].map(m=>[m.id,m])).values()].sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp)||a.id.localeCompare(b.id));}
 export default function ChatDashboard(){
@@ -102,12 +102,12 @@ export default function ChatDashboard(){
  const currentChat=chats.find(c=>c.id===selected),connected=['connected','ready'].includes(status);
  if(!authenticated)return <div className="p-8 text-[#111b21]">{error||'Yükleniyor…'}{error&&<button className="ml-3 underline" onClick={()=>window.location.reload()}>Yeniden dene</button>}</div>;
  return <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white text-[#111b21]">
-  <header className="flex min-h-[48px] shrink-0 items-center justify-between gap-3 border-b border-[#e9edef] bg-[#f7f8fa] px-4">
+  <header className="flex min-h-[48px] shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-[#f7f8fa] px-3 sm:px-4">
    <span className="text-[16px] font-bold text-[#008069]">MyWA</span>
    <div className="flex items-center gap-2">
     <div className="hidden xl:flex"><ReminderButton type="overdue"/><ReminderButton type="summary"/></div>
-    <button title="Gönderim durumları" onClick={()=>setShowNotifications(true)} className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-[#e9edef]">Gönderimler</button>
-    <button disabled={!admin} onClick={()=>setShowQr(true)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-[#54656f]" title="WhatsApp bağlantısı"><span className={'h-2 w-2 rounded-full '+(connected?'bg-[#25d366]':'bg-amber-500')}/><Smartphone size={17}/><span className="hidden sm:inline">{connected?'WhatsApp bağlı':status==='disconnected'?'WhatsApp bağlantısı yok':'WhatsApp bağlanıyor'}</span></button>
+    <button title="Gönderim durumları" onClick={()=>setShowNotifications(true)} className="rounded-lg px-2 py-1.5 text-[13px] text-[#54656f] hover:bg-[#e9edef] sm:px-3">Gönderimler</button>
+    <button onClick={()=>setShowQr(true)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-[#54656f]" title="WhatsApp bağlantısı"><span className={'h-2 w-2 rounded-full '+(connected?'bg-[#25d366]':'bg-amber-500')}/><Smartphone size={17}/><span className="hidden sm:inline">{connected?'WhatsApp bağlı':status==='disconnected'?'WhatsApp bağlantısı yok':'WhatsApp bağlanıyor'}</span></button>
    </div>
   </header>
   {!bannerDismissed&&(!socketOnline||!connected||error||notificationHint)&&<div role="status" className="flex flex-wrap items-center gap-3 border-b border-[#edd8a3] bg-[#fff7dd] px-4 py-2 text-[13px] text-[#66542c]">{!socketOnline?'Panel bağlantısı kesildi; yeniden bağlanılıyor. ':!connected?'WhatsApp çevrimdışı. Gönderimler kuyrukta bekliyor. ':''}{error||notificationHint}<button onClick={()=>{setError('');setNotificationHint('');setBannerDismissed(true);}} aria-label="Uyarıyı kapat" className="ml-auto"><X size={16}/></button></div>}
@@ -115,6 +115,7 @@ export default function ChatDashboard(){
    <nav className="hidden w-[64px] shrink-0 flex-col items-center gap-5 border-r border-[#e9edef] bg-[#f0f2f5] py-5 sm:flex">
     <button onClick={()=>setView('chat')} title="Sohbetler" aria-label="Sohbetler" className={'rounded-full p-3 '+(view==='chat'?'bg-[#d9fdd3] text-[#008069]':'text-[#54656f]')}><MessageCircle size={23}/></button>
     <button onClick={()=>setView('kanban')} title="Kanban" aria-label="Kanban" className={'rounded-full p-3 '+(view==='kanban'?'bg-[#d9fdd3] text-[#008069]':'text-[#54656f]')}><LayoutDashboard size={23}/></button>
+    {admin&&<button onClick={()=>router.push('/admin')} title="Kullanıcılar" aria-label="Kullanıcılar" className="rounded-full p-3 text-[#54656f] hover:bg-[#e9edef]"><Users size={23}/></button>}
     <button onClick={()=>void enableNotifications()} title="Masaüstü bildirimlerini aç" aria-label="Masaüstü bildirimlerini aç" className="rounded-full p-3 text-[#54656f] hover:bg-[#e9edef]"><Bell size={23}/></button>
     <button onClick={()=>{disconnectSocket();localStorage.removeItem('mywa_token');router.push('/login');}} title="Çıkış" aria-label="Çıkış" className="mt-auto p-3 text-[#54656f]"><LogOut size={23}/></button>
    </nav>
@@ -124,10 +125,13 @@ export default function ChatDashboard(){
       {selected?<ChatWindow key={selected} chatId={selected} chatName={currentChat?.name} avatarUrl={currentChat?.avatarUrl} messages={messages} contacts={contacts} myJid={myJid} hasMore={hasMore} loadingOlder={loadingOlder} onLoadOlder={older} onRead={read} tasksOpen={showTasks} taskCount={tasks.filter(t=>t.status!=='DONE').length} onToggleTasks={()=>setShowTasks(!showTasks)} onBack={()=>{activeChat.current=null;setSelected(null);setShowTasks(false);}}/>:<div className="flex h-full flex-col items-center justify-center bg-[#f7f8fa] px-10 text-center"><MessageCircle size={64} strokeWidth={1} className="text-[#00a884]"/><h2 className="mt-6 text-[28px] font-light">MyWA</h2><p className="mt-3 max-w-sm text-[14px] leading-6 text-[#667781]">Sohbetlerinizi ve görevlerinizi tek panelden takip edin.<br/>Başlamak için bir sohbet seçin.</p>{sync?.roundUntil&&<p className="mt-5 text-xs text-[#667781]">WhatsApp geçmişi eşitleniyor…</p>}</div>}
       {notice&&<button onClick={()=>selectChat(notice.chatId)} className="absolute right-5 top-5 z-20 max-w-xs rounded-xl border border-[#d9fdd3] bg-white p-4 text-left shadow-lg"><p className="text-sm font-semibold text-[#008069]">{notice.title}</p><p className="mt-1 line-clamp-2 text-[13px] text-[#667781]">{notice.body||'Yeni medya iletisi'}</p></button>}
      </main>
-     {showTasks&&selected&&<aside className="relative z-30 flex shrink-0 flex-col border-l border-[#e9edef] bg-white shadow-xl md:w-[360px] lg:w-[400px] xl:w-[420px] w-full absolute md:static inset-y-0 right-0"><TaskSidebar chatId={selected} tasks={tasks} contacts={contacts} onRefresh={()=>void fetchData(selected)} onClose={()=>setShowTasks(false)}/></aside>}
+     {showTasks&&selected&&<aside className="fixed inset-0 z-40 flex flex-col bg-white safe-bottom md:static md:z-auto md:w-[360px] md:shrink-0 md:border-l md:border-[#e9edef] md:shadow-xl lg:w-[400px] xl:w-[420px]"><TaskSidebar chatId={selected} tasks={tasks} contacts={contacts} onRefresh={()=>void fetchData(selected)} onClose={()=>setShowTasks(false)}/></aside>}
     </>:<main className="min-w-0 flex-1 overflow-auto bg-[#f7f8fa]"><KanbanBoard/></main>}
   </div>
+  {!(view==='chat'&&selected)&&<nav aria-label="Ana menü" className="safe-bottom flex shrink-0 border-t border-[#e9edef] bg-[#f7f8fa] sm:hidden">
+   {[{id:'chat',label:'Sohbetler',Icon:MessageCircle,on:()=>setView('chat')},{id:'kanban',label:'Görevler',Icon:LayoutDashboard,on:()=>setView('kanban')},...(admin?[{id:'admin',label:'Kullanıcılar',Icon:Users,on:()=>router.push('/admin')}]:[]),{id:'logout',label:'Çıkış',Icon:LogOut,on:()=>{disconnectSocket();localStorage.removeItem('mywa_token');router.push('/login');}}].map(({id,label,Icon,on})=><button key={id} onClick={on} aria-current={view===id?'page':undefined} className={'flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] '+(view===id?'text-[#008069]':'text-[#54656f]')}><Icon size={22}/>{label}</button>)}
+  </nav>}
   {showNotifications&&<NotificationsPanel onClose={()=>setShowNotifications(false)}/>}
-  {admin&&<QRConnectModal isOpen={showQr} onClose={()=>setShowQr(false)} qrCode={qr} status={status}/>}
+  <QRConnectModal isOpen={showQr} onClose={()=>setShowQr(false)} qrCode={qr} status={status}/>
  </div>;
 }

@@ -1,20 +1,23 @@
 import qrcode from 'qrcode';
 import { prisma } from '../lib/prisma';
 import { contactResolver } from './contact-resolver.service';
+import { events } from '../lib/events';
+import { maybeTenant, tenantScoped, updateSelf } from '../lib/tenant';
 
 export class WAHAHttpError extends Error {
   constructor(public status: number) { super(`WAHA HTTP ${status}`); }
 }
 export class WAHAService {
   private baseUrl = (process.env.WAHA_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
-  private sessionName = process.env.WAHA_SESSION_NAME || 'default';
   private currentStatus = 'disconnected';
+  private myJid: string | null = null;
   private currentQr: string | null = null;
   private failures = 0;
   private nextRecoveryAt = 0;
   private running: Promise<void> | null = null;
   public onQR?: (qr: string) => void;
   public onStatus?: (status: string) => void;
+  constructor(private sessionName: string = process.env.WAHA_SESSION_NAME || 'default') {}
   private getHeaders(): Record<string, string> {
     return { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Api-Key': process.env.WAHA_API_KEY || '' };
   }
@@ -30,7 +33,18 @@ export class WAHAService {
     if (changed) this.onStatus?.(status);
     if (qr) this.onQR?.(qr);
   }
-  public getStatus() { return { status: this.currentStatus, qr: this.currentQr }; }
+  public getStatus() { return { status: this.currentStatus, qr: this.currentQr, myJid: this.myJid }; }
+  public getSessionName() { return this.sessionName; }
+  private async rememberSelf(me: any) {
+    if (!me?.id || typeof me.id !== 'string') return;
+    this.myJid = me.id;
+    const tenant = maybeTenant();
+    if (!tenant) return;
+    const phone = me.id.split('@')[0].split(':')[0].replace(/\D/g, '') || null;
+    const lid = typeof me.lid === 'string' ? me.lid : null;
+    await updateSelf(tenant, { phone, lid, name: typeof me.pushName === 'string' && me.pushName ? me.pushName : null })
+      .catch(err => console.warn('[WAHA] Could not store own identity:', err?.message || err));
+  }
   public isConnected() { return this.currentStatus === 'connected'; }
   public async isHealthy() {
     try { await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000); return true; }
@@ -64,7 +78,7 @@ export class WAHAService {
   public async updateStatus() {
     try {
       const session = await (await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000)).json();
-      if (session.status === 'WORKING') this.setStatus('connected');
+      if (session.status === 'WORKING') { await this.rememberSelf(session.me); this.setStatus('connected'); }
       else if (session.status === 'SCAN_QR_CODE') this.setStatus('qr', await this.fetchQrCode());
       else this.setStatus(session.status === 'STARTING' ? 'connecting' : 'disconnected');
       return this.getStatus();
@@ -75,6 +89,17 @@ export class WAHAService {
     const raw = await response.json();
     if (raw.value) return qrcode.toDataURL(raw.value);
     return null;
+  }
+  /**
+   * Requests an 8-character pairing code so the phone can link via
+   * "Link with phone number" instead of scanning a QR code; needed when the
+   * panel is open on that same phone. The session must be waiting for QR.
+   */
+  public async requestPairingCode(phoneNumber: string): Promise<string> {
+    const response = await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/auth/request-code`, { method: 'POST', body: JSON.stringify({ phoneNumber }) }, 20000);
+    const data = await response.json();
+    if (typeof data?.code !== 'string' || !data.code) throw new Error('Pairing code missing');
+    return data.code;
   }
   public async startSession() {
     await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName, enabled: true }, update: { enabled: true } });
@@ -320,4 +345,9 @@ export class WAHAService {
   }
 }
 
-export const wahaService = new WAHAService();
+/** The WAHA session of the tenant active in the current context. */
+export const wahaService = tenantScoped('waha', tenant => {
+  const service = new WAHAService(tenant.session);
+  service.onStatus = () => events.emit('whatsapp_status', tenant.id, service.getStatus());
+  return service;
+});

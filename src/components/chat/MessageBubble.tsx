@@ -42,12 +42,14 @@ export default function MessageBubble({message,isOwn,onCreateTask,contacts=[]}:{
    {message.body ? <div className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]"><Body text={message.body} contacts={contacts}/></div> : !media && <p className="text-sm italic text-[#667781]">Metin içermeyen WhatsApp iletisi</p>}
   </>}
   <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-[#667781]">
+   {/* Touch screens have no hover, so the task action sits in the footer there. */}
+   <button onClick={onCreateTask} title="Mesajdan görev oluştur" aria-label="Mesajdan görev oluştur" className="mr-auto hidden items-center gap-1 rounded-full px-1.5 py-0.5 text-[#008069] [@media(hover:none)]:inline-flex"><Pin size={13}/>Görev</button>
    {message.editedAt && <span>düzenlendi</span>}<span>{formatTime(message.timestamp)}</span>
    {isOwn && (message.ack>=2?<CheckCheck size={16} className={message.ack>=3?'text-[#53bdeb]':''}/>:message.ack===1?<Check size={16}/>:<Clock size={13}/>)}
   </div>
   {!!reactions.length && <div className="mt-1 flex flex-wrap gap-1">{reactions.map((r:any)=><span key={r.senderId} title={nameOf(r.senderId,contacts)} className="rounded-full border border-[#e9edef] bg-white px-2 py-0.5 text-sm">{r.text}</span>)}</div>}
-  <button onClick={onCreateTask} title="Mesajdan görev oluştur" className="absolute right-1 top-1 rounded-full border border-[#e9edef] bg-white p-1.5 text-[#667781] opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus:opacity-100"><Pin size={15}/></button>
+  <button onClick={onCreateTask} title="Mesajdan görev oluştur" className="absolute right-1 top-1 rounded-full border border-[#e9edef] bg-white p-1.5 text-[#667781] opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:hidden"><Pin size={15}/></button>
   {message.task && <div className="mt-2 border-t border-black/10 pt-2 text-xs text-[#008069]">Görev: {message.task.title}</div>}
-  {zoom && <div role="dialog" aria-label="Fotoğraf" className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-6" onClick={()=>setZoom(false)}><button className="absolute right-6 top-4 rounded bg-white px-4 py-2 text-black">Kapat</button><img src={media} alt={message.mediaName || 'Fotoğraf'} className="max-h-[85vh] max-w-full object-contain"/></div>}
+  {zoom && <div role="dialog" aria-label="Fotoğraf" className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-3 sm:p-6" onClick={()=>setZoom(false)}><button className="absolute right-3 top-3 rounded bg-white px-4 py-2 text-black sm:right-6 sm:top-4">Kapat</button><img src={media} alt={message.mediaName || 'Fotoğraf'} className="max-h-[85vh] max-w-full object-contain"/></div>}
  </div>;
 }

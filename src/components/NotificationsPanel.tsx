@@ -31,13 +31,13 @@ export default function NotificationsPanel({ onClose }: { onClose: () => void })
       await load();
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
-  return <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-    <div className="bg-[#f0f2f5] p-5 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-auto">
-      <div className="flex justify-between mb-3"><h2>Bildirimler</h2><button onClick={onClose}>Kapat</button></div>
+  return <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2 sm:p-4">
+    <div className="bg-[#f0f2f5] p-4 sm:p-5 rounded-lg w-full max-w-2xl max-h-[90dvh] overflow-auto">
+      <div className="flex justify-between items-center mb-3"><h2 className="font-medium">Bildirimler</h2><button onClick={onClose} className="rounded px-3 py-1.5 hover:bg-[#e9edef]">Kapat</button></div>
       <p className="text-xs text-[#667781] mb-3">WAHA kabulü, alıcıya teslim edildiği anlamına gelmez. Başarısız veya belirsiz işler aynı sohbetin sonraki gönderimlerini bekletir.</p>
       <select value={status} onChange={e => { setPage(1); setStatus(e.target.value); }} className="bg-[#ffffff] p-2 mb-3"><option value="">Tüm durumlar</option>{Object.entries(deliveryLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
       {error && <p role="alert" className="text-red-400">{error}</p>}
-      {items.map(job => <div key={job.id} className="border-t border-[#374151] py-3 text-sm">
+      {items.map(job => <div key={job.id} className="border-t border-[#d1d7db] py-3 text-sm break-words [overflow-wrap:anywhere]">
         <p>{deliveryLabels[job.status]} · {job.kind} · {job.chatId}</p>
         {job.taskId && <a href={`/t/${job.taskId}`} className="text-[#00A884]">Görevi incele</a>}
         {job.lastError && <p className="text-red-300">{job.lastError}</p>}

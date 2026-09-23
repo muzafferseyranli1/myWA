@@ -1,10 +1,30 @@
-import { Router } from 'express';
+import { RequestHandler, Router } from 'express';
 import { taskService } from '../services/task.service';
 import { reminderService } from '../services/reminder.service';
 import { broadcastTaskCreated, broadcastTaskUpdated, broadcastTaskDeleted } from '../sockets';
-import { requireAuth, optionalAuth } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
+import { listTenants, runWithTenant, Tenant } from '../lib/tenant';
 
 const router = Router();
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * Task links (/t/:id) are opened without logging in, by people who received
+ * them on WhatsApp. The task id is a random UUID, so it is unique across all
+ * schemas; the owning tenant is the one whose schema contains it.
+ */
+async function tenantOfTask(taskId: string): Promise<Tenant | undefined> {
+  if (!UUID.test(taskId)) return undefined;
+  for (const tenant of listTenants()) {
+    if (await tenant.db.task.findUnique({ where: { id: taskId }, select: { id: true } })) return tenant;
+  }
+  return undefined;
+}
+const publicTask = (handler: RequestHandler): RequestHandler => async (req, res, next) => {
+  const tenant = await tenantOfTask(String(req.params.id)).catch(() => undefined);
+  if (!tenant) return res.status(404).json({ error: 'Görev bulunamadı' });
+  return runWithTenant(tenant, () => handler(req, res, next));
+};
 
 router.get('/kanban', requireAuth, async (req, res) => {
   try {
@@ -87,7 +107,7 @@ router.post('/:id/remind', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/:id/public', async (req, res) => {
+router.get('/:id/public', publicTask(async (req, res) => {
   try {
     const taskId = String(req.params.id);
     const task = await taskService.getTaskById(taskId);
@@ -98,9 +118,9 @@ router.get('/:id/public', async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
-});
+}));
 
-router.post('/:id/close', optionalAuth, async (req: any, res) => {
+router.post('/:id/close', publicTask(async (req, res) => {
   try {
     const taskId = String(req.params.id);
     const { completionNote, completedBy } = req.body;
@@ -119,6 +139,6 @@ router.post('/:id/close', optionalAuth, async (req: any, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
-});
+}));
 
 export default router;

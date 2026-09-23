@@ -52,13 +52,13 @@ export default function ChatWindow({chatId,chatName,avatarUrl,messages,contacts=
   });
  };
  return <div className="relative flex h-full min-w-0 flex-col">
-  <header className="flex h-[72px] shrink-0 items-center gap-3 border-b border-[#e9edef] bg-white px-5">
-   <button onClick={onBack} className="md:hidden" aria-label="Sohbetlere dön"><ArrowLeft size={22}/></button>
+  <header className="flex h-[64px] shrink-0 items-center gap-2 border-b border-[#e9edef] bg-white px-2 sm:h-[72px] sm:gap-3 sm:px-5">
+   <button onClick={onBack} className="-m-1 rounded-full p-2 md:hidden" aria-label="Sohbetlere dön"><ArrowLeft size={22}/></button>
    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#e9edef] text-[#667781]">{avatarUrl?<img src={avatarUrl} alt="" className="h-full w-full object-cover"/>:chatId.endsWith('@g.us')?<Users size={22}/>:name.slice(0,2).toUpperCase()}</div>
    <div className="min-w-0 flex-1"><h2 className="truncate text-[16px] font-medium">{name}</h2><p className="truncate text-[12px] text-[#667781]">{chatId.endsWith('@g.us')?(contacts.length?contacts.slice(0,8).map(c=>c.displayName||c.pushName||c.phoneNumber).join(', '):'Grup sohbeti'):'WhatsApp sohbeti'}</p></div>
-   <button onClick={onToggleTasks} aria-pressed={tasksOpen} className="flex items-center gap-2 rounded-full px-3 py-2 text-sm text-[#667781] hover:bg-[#f0f2f5]" title="Sohbet görevleri"><ListTodo size={22}/><span className="hidden lg:inline">Görevler{taskCount?' '+taskCount:''}</span></button>
+   <button onClick={onToggleTasks} aria-pressed={tasksOpen} className="relative flex items-center gap-2 rounded-full px-3 py-2 text-sm text-[#667781] hover:bg-[#f0f2f5]" title="Sohbet görevleri"><ListTodo size={22}/><span className="hidden lg:inline">Görevler{taskCount?' '+taskCount:''}</span>{taskCount>0&&<span aria-label={taskCount+' açık görev'} className="absolute right-1 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#25d366] px-1 text-[10px] font-semibold text-white lg:hidden">{taskCount}</span>}</button>
   </header>
-  <div ref={scroller} onScroll={()=>{const el=scroller.current;if(el){const near=el.scrollHeight-el.scrollTop-el.clientHeight<100;setNearBottom(near);if(near)setNewCount(0);}}} className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-8 lg:px-[6%]">
+  <div ref={scroller} onScroll={()=>{const el=scroller.current;if(el){const near=el.scrollHeight-el.scrollTop-el.clientHeight<100;setNearBottom(near);if(near)setNewCount(0);}}} className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-8 sm:py-5 lg:px-[6%]">
    {hasMore && <div className="mb-4 text-center"><button disabled={loadingOlder} onClick={()=>void loadOlder()} className="rounded-lg bg-white px-4 py-2 text-sm text-[#008069] shadow-sm">{loadingOlder?'Yükleniyor…':'Önceki mesajları yükle'}</button></div>}
    {!list.length && <p className="mx-auto mt-12 w-fit rounded-lg bg-white/90 px-5 py-3 text-sm text-[#667781]">Bu sohbette henüz kayıtlı mesaj yok.</p>}
    {list.map((message,index)=>{
@@ -67,11 +67,11 @@ export default function ChatWindow({chatId,chatName,avatarUrl,messages,contacts=
     return <div key={message.id} className="flex flex-col">{date!==previous&&<div className="my-4 self-center rounded-lg bg-white/90 px-3 py-1.5 text-[12px] text-[#54656f] shadow-sm">{date}</div>}<MessageBubble message={message} isOwn={!!message.isFromMe} contacts={contacts} onCreateTask={()=>setTaskMessage({...message,senderName:message.senderName||message.sender?.displayName||message.sender?.pushName})}/></div>;
    })}
   </div>
-  {!nearBottom&&<button onClick={()=>bottom(true)} className="absolute bottom-24 right-5 flex items-center gap-2 rounded-full bg-white p-3 text-[#667781] shadow-lg" aria-label="Son mesajlara git">{newCount>0&&<span className="text-xs font-semibold text-[#008069]">{newCount} yeni mesaj</span>}<ArrowDown size={22}/></button>}
+  {!nearBottom&&<button onClick={()=>bottom(true)} className="absolute bottom-24 right-3 sm:right-5 flex items-center gap-2 rounded-full bg-white p-3 text-[#667781] shadow-lg" aria-label="Son mesajlara git">{newCount>0&&<span className="text-xs font-semibold text-[#008069]">{newCount} yeni mesaj</span>}<ArrowDown size={22}/></button>}
   {sendStatus&&<p role="status" className="bg-[#f0f2f5] px-6 pt-2 text-[12px] text-[#667781]">{sendStatus}</p>}
-  <div className="relative flex min-h-[72px] shrink-0 items-end gap-3 bg-[#f0f2f5] px-4 py-3">
-   <button onClick={()=>setEmojiOpen(!emojiOpen)} aria-label="Emoji ekle" className="mb-2 text-[#54656f]"><Smile size={25}/></button>
-   {emojiOpen&&<div className="absolute bottom-20 left-4 flex gap-2 rounded-xl border bg-white p-3 shadow-lg">{['😊','👍','❤️','🙏','✅','🎉','😂'].map(emoji=><button key={emoji} className="text-2xl" onClick={()=>{setInput(t=>t+emoji);setEmojiOpen(false);}}>{emoji}</button>)}</div>}
+  <div className="safe-bottom relative flex min-h-[64px] shrink-0 items-end gap-2 bg-[#f0f2f5] px-2 py-2 sm:min-h-[72px] sm:gap-3 sm:px-4 sm:py-3">
+   <button onClick={()=>setEmojiOpen(!emojiOpen)} aria-label="Emoji ekle" className="mb-1.5 p-1 text-[#54656f]"><Smile size={25}/></button>
+   {emojiOpen&&<div className="absolute bottom-full left-2 mb-2 flex gap-1 rounded-xl border bg-white p-2 shadow-lg sm:left-4 sm:gap-2 sm:p-3">{['😊','👍','❤️','🙏','✅','🎉','😂'].map(emoji=><button key={emoji} className="text-2xl" onClick={()=>{setInput(t=>t+emoji);setEmojiOpen(false);}}>{emoji}</button>)}</div>}
    <textarea value={input} disabled={sending} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();send();}}} rows={1} placeholder="Bir mesaj yazın" aria-label="Mesaj" className="max-h-36 min-h-[46px] flex-1 resize-none rounded-2xl bg-white px-4 py-3 text-[15px] leading-5 outline-none focus:ring-1 focus:ring-[#c5e5c1]"/>
    <button disabled={sending||!input.trim()} onClick={send} aria-label="Mesajı gönder" className="mb-2 p-1 text-[#008069] disabled:opacity-40"><Send size={25}/></button>
   </div>

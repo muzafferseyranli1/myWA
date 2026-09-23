@@ -1,6 +1,7 @@
 import { Router, raw } from 'express';
 import { acceptEvent } from '../services/delivery.service';
 import { verifySignature, eventKey, parseMessage } from '../lib/reliability';
+import { runWithTenant, tenantForSession, Tenant } from '../lib/tenant';
 const router = Router();
 router.post('/', raw({ type: 'application/json', limit: '2mb' }), async (req, res) => {
   const secret = process.env.WAHA_WEBHOOK_SECRET || '';
@@ -16,15 +17,18 @@ router.post('/', raw({ type: 'application/json', limit: '2mb' }), async (req, re
   }
 
   let body: any;
+  let tenant: Tenant | undefined;
   try {
     body = JSON.parse(req.body.toString('utf8'));
-    if (body.session !== (process.env.WAHA_SESSION_NAME || 'default')) return res.status(400).json({ error: 'Unexpected session' });
+    // Each WAHA session belongs to exactly one user; the event is stored only in that user's schema.
+    tenant = typeof body.session === 'string' ? tenantForSession(body.session) : undefined;
+    if (!tenant) return res.status(400).json({ error: 'Unexpected session' });
     if (!['message', 'message.any', 'message.ack', 'message.reaction', 'message.edited', 'message.revoked', 'call.received', 'call.accepted', 'call.rejected', 'session.status', 'state.change'].includes(body.event)) return res.json({ ignored: true });
     eventKey(body);
     if (['message','message.any'].includes(body.event)) parseMessage(body.payload);
     else if (body.event.startsWith('message') && !body.payload) throw new Error('Missing payload');
   } catch { return res.status(400).json({ error: 'Invalid event' }); }
-  try { await acceptEvent(body); res.json({ received: true }); }
+  try { await runWithTenant(tenant!, () => acceptEvent(body)); res.json({ received: true }); }
   catch { res.status(503).json({ error: 'Event storage unavailable; retry later' }); }
 });
 export default router;

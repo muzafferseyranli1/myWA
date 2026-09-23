@@ -46,6 +46,14 @@ model User {
   displayName  String   @map("display_name")
   role         UserRole @default(USER)
   isActive     Boolean  @default(true) @map("is_active")
+  // Tenant isolation: every user owns one PostgreSQL schema and one WAHA session.
+  // Only the rows in the public schema are authoritative; tenant schemas hold a
+  // mirror row so Task.createdBy keeps its foreign key.
+  tenantSchema String?  @map("tenant_schema")
+  wahaSession  String?  @unique @map("waha_session")
+  selfPhone    String?  @map("self_phone")
+  selfLid      String?  @map("self_lid")
+  selfName     String?  @map("self_name")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

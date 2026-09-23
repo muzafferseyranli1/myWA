@@ -53,6 +53,7 @@ if (req.url === '/api/sendText') {
   const {default:tasks} = await import('../server/routes/tasks');
   const {createUploadRouter} = await import('../server/middleware/upload');
   const {setupSockets} = await import('../server/sockets');
+  const tenantLib = await import('../server/lib/tenant');
   const dir = await mkdtemp(path.join(os.tmpdir(),'mywa-upload-test-'));
   process.env.UPLOAD_DIR=dir; process.env.MAX_FILE_SIZE='0.001'; process.env.UPLOAD_QUOTA_MB='0.001';
   const app = express(); app.use('/webhook',webhooks); app.use(express.json());
@@ -61,9 +62,16 @@ if (req.url === '/api/sendText') {
   process.env.MEDIA_DIR=path.join(dir,'media');
   app.use('/api/media',(await import('../server/routes/media')).default);
   app.use('/chats',(await import('../server/routes/chats')).default);
+  app.use('/admin',(await import('../server/routes/admin')).default);
   const api=http.createServer(app); const socketServer=new Server(api); setupSockets(socketServer);
   await new Promise<void>(r=>api.listen(0,'127.0.0.1',r));
   const base=`http://127.0.0.1:${(api.address() as any).port}`;
+  // The legacy owner of the (test) public schema, bound to the 'default' WAHA session.
+  await tenantLib.systemDb().user.create({data:{id:'test-user',username:'test-user',passwordHash:'!',displayName:'Test',role:'USER',tenantSchema:'public',wahaSession:'default'}});
+  await tenantLib.loadTenants();
+  const tenant = tenantLib.tenantForUser('test-user')!;
+  // Servers above were started outside any tenant, so every request must establish its own.
+  await tenantLib.runWithTenant(tenant, async () => {
   const token=jwt.sign({id:'test-user',role:'USER'},process.env.JWT_SECRET!);
   const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
   const event={event:'message.any',session:'default',payload:{id:randomUUID(),from:'inbound@g.us',participant:'123@c.us',body:'hello',timestamp:1780000000}};
@@ -72,8 +80,10 @@ if (req.url === '/api/sendText') {
   try {
     await t.test('authentication and webhook signature are enforced before writes',async()=>{
       assert.equal((await fetch(base+'/whatsapp/status')).status,401);
-      assert.equal((await fetch(base+'/whatsapp/connect',{method:'POST',headers})).status,403);
-      assert.equal((await fetch(base+'/whatsapp/disconnect',{method:'POST',headers})).status,403);
+      // A valid token of a user without a tenant cannot reach any data.
+      const stranger=jwt.sign({id:'no-such-user',role:'ADMIN'},process.env.JWT_SECRET!);
+      assert.equal((await fetch(base+'/whatsapp/status',{headers:{Authorization:`Bearer ${stranger}`}})).status,401);
+      assert.equal((await fetch(base+'/chats',{headers:{Authorization:`Bearer ${stranger}`}})).status,401);
       assert.equal((await fetch(base+'/upload',{method:'POST'})).status,401);
       assert.equal((await hook(event,false)).status,401);
       assert.equal((await hook({...event,session:'other'})).status,400);
@@ -89,9 +99,9 @@ if (req.url === '/api/sendText') {
       await delivery.processInbox(); events.off('new_message',listener);
       assert.equal(await prisma.message.count({where:{id:event.payload.id}}),1); assert.equal(emitted,1);
       assert.equal((await prisma.incomingEvent.findFirstOrThrow()).status,'COMPLETED');
-      const original=prisma.$queryRaw;
-      try { (prisma as any).$queryRaw=async()=>{throw new Error('DB unavailable');}; assert.equal((await hook({...event,payload:{...event.payload,id:randomUUID()}})).status,503); }
-      finally { prisma.$queryRaw=original; }
+      const db=tenant.db as any, original=db.$queryRaw;
+      try { db.$queryRaw=async()=>{throw new Error('DB unavailable');}; assert.equal((await hook({...event,payload:{...event.payload,id:randomUUID()}})).status,503); }
+      finally { db.$queryRaw=original; }
     });
     await t.test('session lifecycle preserves working sessions and persisted disconnect',async()=>{
       await wahaService.reconcile(); calls.length=0;
@@ -107,7 +117,8 @@ if (req.url === '/api/sendText') {
       await gate(); state='WORKING'; await wahaService.reconcile(); httpError=401;
       await assert.rejects(wahaService.reconcile()); assert.equal(wahaService.isConnected(),false);
       httpError=0; state='SCAN_QR_CODE'; await wahaService.reconcile();
-      assert.equal((await (await fetch(base+'/whatsapp/status',{headers})).json()).qr,null);
+      // Every user sees the QR code of their own session.
+      assert.ok((await (await fetch(base+'/whatsapp/status',{headers})).json()).qr.startsWith('data:image/png'));
       state='WORKING'; await wahaService.reconcile();
       const original=globalThis.fetch; globalThis.fetch=async()=>{throw new DOMException('timeout','TimeoutError');};
       try { await assert.rejects(wahaService.updateStatus()); assert.equal(wahaService.isConnected(),false); }
@@ -252,6 +263,71 @@ if (req.url === '/api/sendText') {
       const previewMsg=await prisma.message.findUniqueOrThrow({where:{id:'preview-msg-id'}});
       assert.equal((previewMsg.preview as any)?.title,'Example Title');
     });
+    await t.test('tenants are isolated: a second user reaches none of the first user\'s data',async()=>{
+      const other=await tenantLib.systemDb().user.create({data:{username:'other-user',passwordHash:'!',displayName:'Other',role:'USER'}});
+      const otherTenant=(await tenantLib.provisionTenant(other.id))!;
+      assert.notEqual(otherTenant.schema,'public'); assert.match(otherTenant.session,/^u_[a-f0-9]+$/);
+      const otherToken=jwt.sign({id:other.id,role:'USER'},process.env.JWT_SECRET!);
+      const theirHeaders={Authorization:`Bearer ${otherToken}`,'Content-Type':'application/json'};
+      const chatId=event.payload.from;
+      assert.ok(await prisma.message.count({where:{chatId}})>0,'the first user has messages in this chat');
+      // REST: chats, messages, contacts, tasks, notifications.
+      assert.deepEqual(await (await fetch(base+'/chats',{headers:theirHeaders})).json(),[]);
+      assert.equal((await (await fetch(base+'/chats/'+encodeURIComponent(chatId)+'/messages',{headers:theirHeaders})).json()).messages.length,0);
+      assert.deepEqual(await (await fetch(base+'/chats/'+encodeURIComponent(chatId)+'/contacts',{headers:theirHeaders})).json(),[]);
+      assert.equal(JSON.stringify(await (await fetch(base+'/tasks/kanban',{headers:theirHeaders})).json()).includes('offline task'),false);
+      assert.equal((await (await fetch(base+'/notifications',{headers:theirHeaders})).json()).total,0);
+      const ownTask=await prisma.task.findFirstOrThrow();
+      assert.notEqual((await fetch(base+'/tasks/'+ownTask.id,{method:'PATCH',headers:theirHeaders,body:JSON.stringify({title:'hijacked'})})).status,200);
+      assert.notEqual((await fetch(base+'/tasks/'+ownTask.id,{method:'DELETE',headers:theirHeaders})).status,200);
+      assert.notEqual((await prisma.task.findUniqueOrThrow({where:{id:ownTask.id}})).title,'hijacked');
+      await fetch(base+'/chats/read-all',{method:'POST',headers:theirHeaders});
+      assert.equal(await prisma.messageRead.count({where:{userId:other.id}}),0);
+      // Media: a token issued inside the other tenant only ever resolves in that tenant.
+      await prisma.message.create({data:{id:'photo-private',chatId,messageType:'IMAGE',mediaMime:'image/png',mediaUrl:'http://unreachable-container:3000/api/files/test.png',timestamp:new Date()}});
+      const {mediaView}=await import('../server/lib/media');
+      const foreign=tenantLib.runWithTenant(otherTenant,()=>mediaView({id:'photo-private',messageType:'IMAGE'}).mediaUrl!);
+      assert.equal((await fetch(base+foreign)).status,404);
+      // Webhook: events of the other session are stored only in the other schema.
+      const before=await prisma.message.count();
+      const otherEvent={event:'message.any',session:otherTenant.session,payload:{id:'other-only',from:chatId,participant:'555@c.us',body:'secret of other',timestamp:1780000100}};
+      assert.equal((await hook(otherEvent)).status,200);
+      await tenantLib.runWithTenant(otherTenant,()=>delivery.processInbox());
+      assert.equal(await prisma.message.count(),before);
+      assert.equal(await otherTenant.db.message.count({where:{id:'other-only'}}),1);
+      // Sockets: both users open the same WhatsApp group id; only the owner receives its events.
+      const mine=client(base,{auth:{token},transports:['websocket']}), theirs=client(base,{auth:{token:otherToken},transports:['websocket']});
+      try {
+        await Promise.all([mine,theirs].map(socket=>new Promise<void>((resolve,reject)=>{socket.once('connect',resolve);socket.once('connect_error',reject);})));
+        const got={mine:[] as any[],theirs:[] as any[]};
+        for(const name of ['new_message','message_arrived','chat_updated']){mine.on(name,(m:any)=>got.mine.push(m));theirs.on(name,(m:any)=>got.theirs.push(m));}
+        mine.emit('join_chat',chatId); theirs.emit('join_chat',chatId);
+        await new Promise(r=>setTimeout(r,300));
+        await hook({...otherEvent,payload:{...otherEvent.payload,id:'other-live',body:'live secret'}});
+        await tenantLib.runWithTenant(otherTenant,()=>delivery.processInbox());
+        await new Promise(r=>setTimeout(r,300));
+        assert.deepEqual(got.mine,[]);
+        assert.ok(got.theirs.some(m=>m?.id==='other-live'&&m.body==='live secret'));
+      } finally { mine.disconnect(); theirs.disconnect(); }
+      // Deactivation revokes access and stops routing webhook events immediately.
+      await tenantLib.systemDb().user.update({where:{id:other.id},data:{isActive:false}}); await tenantLib.loadTenants();
+      assert.equal((await fetch(base+'/chats',{headers:theirHeaders})).status,401);
+      assert.equal((await hook({...otherEvent,payload:{...otherEvent.payload,id:'after-disable'}})).status,400);
+    });
+    await t.test('administrators manage accounts without any route to user data',async()=>{
+      assert.equal((await fetch(base+'/admin/users',{headers})).status,403);
+      const admin=await tenantLib.systemDb().user.create({data:{username:'admin-user',passwordHash:'!',displayName:'Admin',role:'ADMIN'}});
+      await tenantLib.provisionTenant(admin.id);
+      const adminHeaders={Authorization:`Bearer ${jwt.sign({id:admin.id,role:'ADMIN'},process.env.JWT_SECRET!)}`,'Content-Type':'application/json'};
+      // The administrator's own tenant is empty: being admin grants no view into other schemas.
+      assert.deepEqual(await (await fetch(base+'/chats',{headers:adminHeaders})).json(),[]);
+      const created=await fetch(base+'/admin/users',{method:'POST',headers:adminHeaders,body:JSON.stringify({username:'new.user',password:'long-enough',displayName:'New'})});
+      assert.equal(created.status,201);
+      const view=await created.json(); assert.equal(view.provisioned,true); assert.equal(view.role,'USER');
+      const list=await (await fetch(base+'/admin/users',{headers:adminHeaders})).json();
+      assert.ok(list.every((u:any)=>!('qr' in u)&&!('passwordHash' in u)&&!('tenantSchema' in u)));
+      assert.equal((await fetch(base+'/admin/users/'+admin.id,{method:'PATCH',headers:adminHeaders,body:JSON.stringify({isActive:false})})).status,400);
+    });
   } finally {
     socketServer.close(); await new Promise<void>(r=>api.close(()=>r()));
     mock.closeAllConnections(); await new Promise<void>(r=>mock.close(()=>r()));
@@ -260,4 +336,5 @@ if (req.url === '/api/sendText') {
     assert.ok(path.basename(dir).startsWith('mywa-upload-test-'));
     await rm(dir,{recursive:true,force:true});
   }
+  });
 });

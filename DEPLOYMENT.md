@@ -168,3 +168,14 @@ Resmi sözleşmeler: [WAHA olaylar/HMAC/retry](https://waha.devlike.pro/docs/how
 [WAHA oturum yaşam döngüsü](https://waha.devlike.pro/docs/how-to/sessions/),
 [WAHA NOWEB Store](https://waha.devlike.pro/docs/engines/noweb/).
 
+
+## Çok Kullanıcılı Yapı (Kullanıcı İzolasyonu)
+
+- Her kullanıcının kendi PostgreSQL şeması (`t_xxxxxxxxxxxx`) ve kendi WAHA oturumu (`u_xxxxxxxxxxxx`) vardır. Sohbet, mesaj, görev ve kuyruk verileri bu şemada tutulur; bir kullanıcı başka birinin verisine uygulama üzerinden erişemez.
+- Kurulumdan önceki veriler ana şemada (`public`) kalır ve ilk yönetici hesabına aittir; bu hesap `WAHA_SESSION_NAME` oturumunu kullanmaya devam eder. Migration sırasında var olan diğer hesaplar veriye erişimini kaybeder ve yönetici panelinden "Hazırla" ile boş bir alanla yeniden açılır.
+- Yeni kullanıcılar `/admin` sayfasından oluşturulur; şema ve migration otomatik uygulanır. Kullanıcı giriş yapıp kendi WhatsApp'ını QR veya telefon numarası (eşleştirme kodu) ile bağlar.
+- `scripts/migrate-safe.mjs` ana şemadan sonra tüm kullanıcı şemalarını da günceller.
+- Birden fazla WAHA oturumu için WAHA 2026.6.1 veya sonrası gerekir (`devlikeapro/waha`); eski `waha-plus` imajı gerekmez.
+- Webhook olayları `session` alanına göre ilgili kullanıcıya yönlendirilir; tanınmayan oturumlar 400 alır. WAHA HMAC başlığı gönderdiği doğrulandıktan sonra `STRICT_WEBHOOK_HMAC=true` ayarlanmalıdır.
+- Yönetici hesapları yönetir (oluşturma, şifre sıfırlama, devre dışı bırakma) ama başka kullanıcıların sohbetlerini, mesajlarını veya QR kodunu göremez. Veritabanı parolasına sahip olan herkes tüm şemalara doğrudan erişebilir; bu parola gizli tutulmalıdır.
+- Web paneli telefonla uyumludur ve ana ekrana eklenebilir (PWA manifest). Android uygulaması (`mobile/`) artık geliştirilmemektedir.

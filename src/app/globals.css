@@ -13,3 +13,6 @@ button:focus-visible,a:focus-visible { outline:2px solid #008069;outline-offset:
 .bubble-out::before { content:'';position:absolute;top:0;right:-7px;border-left:8px solid #d9fdd3;border-bottom:8px solid transparent; }
 .bubble-in::before { content:'';position:absolute;top:0;left:-7px;border-right:8px solid white;border-bottom:8px solid transparent; }
 .message-bubble { overflow-wrap:anywhere; }
+/* Phones: iOS zooms into any form field smaller than 16px on focus. */
+@media (max-width: 640px) { input, textarea, select { font-size:16px !important; } }
+.safe-bottom { padding-bottom:env(safe-area-inset-bottom); }

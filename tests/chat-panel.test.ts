@@ -1,4 +1,5 @@
-import test from 'node:test';
+import { tenantTest } from './helpers/tenant';
+const test = tenantTest();
 import assert from 'node:assert/strict';
 import {tokenizeMessage} from '../src/lib/message-text';
 import {mediaView,providerFileUrl,verifyMediaToken} from '../server/lib/media';
@@ -14,8 +15,9 @@ test('media links are scoped, temporary, stable within a period and never reveal
  const first=mediaView(m),second=mediaView(m);
  assert.equal(first.mediaUrl,second.mediaUrl);
  const token=new URL(first.mediaUrl,'http://localhost').searchParams.get('token')!;
- assert.equal(verifyMediaToken(token,'message-one'),true);
- assert.equal(verifyMediaToken(token,'message-two'),false);
+ // The token names the tenant it was issued for and grants only this message.
+ assert.equal(verifyMediaToken(token,'message-one'),'unit-tenant');
+ assert.equal(verifyMediaToken(token,'message-two'),null);
  assert.equal(providerFileUrl(m.mediaUrl,'http://127.0.0.1:3000'),'http://127.0.0.1:3000/api/files/test.png');
  assert.throws(()=>providerFileUrl('http://evil/secret','http://localhost'));
  assert.throws(()=>providerFileUrl('http://evil/api/files/a%2f..%2fsecret','http://localhost'));

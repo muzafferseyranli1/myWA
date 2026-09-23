@@ -5,8 +5,10 @@ import { parseMessage, isStatusOrBroadcast } from '../lib/reliability';
 import { events } from '../lib/events';
 import { contactResolver } from './contact-resolver.service';
 
-let discoveryOffset = 0;
-const avatarCheckedMap = new Map<string, number>();
+import { currentTenant, tenantScoped } from '../lib/tenant';
+
+// Discovery cursor and avatar back-off are kept per tenant.
+const state = tenantScoped('sync', () => ({ discoveryOffset: 0, avatarChecked: new Map<string, number>() }));
 
 /**
  * Eksik profil resmi olan sohbetlerin avatarlarını arka planda WAHA'dan çeker
@@ -31,11 +33,11 @@ async function syncMissingAvatars(): Promise<void> {
 
     let updatedCount = 0;
     for (const chat of chatsWithoutAvatar) {
-      const lastChecked = avatarCheckedMap.get(chat.id);
+      const lastChecked = state.avatarChecked.get(chat.id);
       if (lastChecked && now - lastChecked < twentyFourHours) {
         continue;
       }
-      avatarCheckedMap.set(chat.id, now);
+      state.avatarChecked.set(chat.id, now);
 
       let pictureUrl: string | null = null;
 
@@ -83,11 +85,11 @@ async function syncMissingAvatars(): Promise<void> {
 
 export async function syncHistory() {
   if (!wahaService.isConnected()) return;
-  const session = process.env.WAHA_SESSION_NAME || 'default';
-  let state = await prisma.syncState.upsert({ where: { session }, create: { session }, update: {} });
+  const session = currentTenant().session;
+  let sync = await prisma.syncState.upsert({ where: { session }, create: { session }, update: {} });
   try {
-    if (!state.roundUntil) state = await prisma.syncState.update({ where: { session }, data: { roundUntil: Math.floor(Date.now()/1000), offset: 0 } });
-    const messages = await wahaService.getHistory(state.offset, Math.max(0, state.completedUntil - 120), state.roundUntil!);
+    if (!sync.roundUntil) sync = await prisma.syncState.update({ where: { session }, data: { roundUntil: Math.floor(Date.now()/1000), offset: 0 } });
+    const messages = await wahaService.getHistory(sync.offset, Math.max(0, sync.completedUntil - 120), sync.roundUntil!);
     if (!Array.isArray(messages)) throw new Error('Unexpected history response');
     // Persist each page before advancing its durable cursor. Replaying an
     // interrupted page shares the same message keys as live webhooks.
@@ -105,8 +107,8 @@ export async function syncHistory() {
       if (Number.isInteger(payload.ack)) await prisma.message.updateMany({ where: { id: payload.id, OR: [{ack: null},{ack:{lt:payload.ack}}] }, data: { ack: payload.ack } });
     }
     const complete = messages.length === 0;
-    await prisma.syncState.update({ where: { session }, data: complete ? { completedUntil: state.roundUntil!, roundUntil: null, offset: 0, lastSuccessAt: new Date(), lastError: null } : { offset: state.offset + 100, lastError: null } });
-    const chats = await wahaService.getChatOverview(discoveryOffset);
+    await prisma.syncState.update({ where: { session }, data: complete ? { completedUntil: sync.roundUntil!, roundUntil: null, offset: 0, lastSuccessAt: new Date(), lastError: null } : { offset: sync.offset + 100, lastError: null } });
+    const chats = await wahaService.getChatOverview(state.discoveryOffset);
     if (!Array.isArray(chats)) throw new Error('Unexpected chat response');
     for (const chat of chats) {
       if (typeof chat.id !== 'string' || !chat.id.includes('@')) continue;
@@ -174,7 +176,7 @@ export async function syncHistory() {
         }
       });
     }
-    discoveryOffset = chats.length ? discoveryOffset + 100 : 0;
+    state.discoveryOffset = chats.length ? state.discoveryOffset + 100 : 0;
     if (chats.length) events.emit('chat_updated');
 
     // Eksik profil resimlerini arka planda WAHA'dan tamamla

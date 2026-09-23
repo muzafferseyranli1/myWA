@@ -1,4 +1,5 @@
-import test from 'node:test';
+import { tenantTest } from './helpers/tenant';
+const test = tenantTest();
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { verifySignature, eventKey, parseMessage, istanbulDay, reminderDue, retryDelay, classifySendError } from '../server/lib/reliability';

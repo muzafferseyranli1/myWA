@@ -6,6 +6,7 @@ import { getSocket } from '../../lib/socket';
 import { moveTaskById } from '../../lib/client-state';
 import { deliveryLabels } from '../../lib/types';
 import EditTaskModal from './EditTaskModal';
+import ReminderButton from './ReminderButton';
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 
 const initialColumns = {
@@ -175,10 +176,12 @@ export default function KanbanBoard() {
   };
 
   return (
-    <div className="h-full flex flex-col p-6 bg-[#ffffff]">
-      <div className="mb-6 flex justify-between items-center flex-wrap gap-4">
-        <h2 className="text-2xl font-bold text-[#111b21]">Tüm Görevler (Kanban)</h2>
-        <div className="flex space-x-4">
+    <div className="h-full flex flex-col p-3 sm:p-6 bg-[#ffffff]">
+      <div className="mb-4 flex justify-between items-center flex-wrap gap-3 sm:mb-6 sm:gap-4">
+        <h2 className="text-xl font-bold text-[#111b21] sm:text-2xl">Tüm Görevler<span className="hidden sm:inline"> (Kanban)</span></h2>
+        {/* The header's reminder buttons are only shown on wide screens. */}
+        <div className="flex flex-wrap gap-2 xl:hidden"><ReminderButton type="overdue"/><ReminderButton type="summary"/></div>
+        <div className="flex w-full gap-2 sm:w-auto sm:gap-4">
           <select
             value={priorityFilter}
             onChange={e => setPriorityFilter(e.target.value)}
@@ -195,14 +198,14 @@ export default function KanbanBoard() {
             placeholder="Görev ara..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="rounded bg-[#f0f2f5] px-3 py-1.5 text-sm text-[#111b21] focus:outline-none placeholder-[#667781]"
+            className="min-w-0 flex-1 rounded bg-[#f0f2f5] px-3 py-1.5 text-sm sm:flex-none text-[#111b21] focus:outline-none placeholder-[#667781]"
           />
         </div>
       </div>
 
       {error && <p role="alert" className="text-red-500 mb-3 text-sm font-medium">{error}</p>}
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex flex-1 space-x-6 overflow-x-auto">
+        <div className="-mx-3 flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto px-3 sm:mx-0 sm:snap-none sm:gap-6 sm:px-0">
           {Object.values(columns).map((col: any) => {
             const filteredTasks = col.tasks.filter((t: any) => {
               const matchesSearch = t.title.toLowerCase().includes(search.toLowerCase());
@@ -210,7 +213,7 @@ export default function KanbanBoard() {
               return matchesSearch && matchesPriority;
             });
             return (
-              <div key={col.id} className="flex flex-col w-80 bg-[#f0f2f5] rounded-lg">
+              <div key={col.id} className="flex w-[85vw] max-w-80 shrink-0 snap-center flex-col rounded-lg bg-[#f0f2f5] sm:w-80">
                 <div className="p-3 border-b border-[#e9edef] flex justify-between items-center bg-[#e9edef] rounded-t-lg">
                   <h3 className="font-medium text-[#111b21]">{col.title}</h3>
                   <span className="bg-[#ffffff] text-xs px-2 py-0.5 rounded text-[#667781] font-medium">{filteredTasks.length}</span>

@@ -243,7 +243,7 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
                 type="text"
                 value={completedBy}
                 onChange={(e) => setCompletedBy(e.target.value)}
-                placeholder="Örn: Muzaffer"
+                placeholder="Örn: Ahmet Yılmaz"
                 className="w-full rounded-lg bg-[#ffffff] border border-[#e9edef] px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00A884]"
               />
             </div>

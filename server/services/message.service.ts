@@ -3,6 +3,7 @@ import type { Prisma, MessageType } from '@prisma/client';
 import { contactResolver } from './contact-resolver.service';
 import { mediaView } from '../lib/media';
 import { isStatusOrBroadcast } from '../lib/reliability';
+import { isSelfId, isSelfName } from '../lib/self';
 
 export const messageService = {
   async saveMessage(data: any, db: Prisma.TransactionClient = prisma) {
@@ -17,28 +18,28 @@ export const messageService = {
 
     // Only update chat name if it's provided and not a fallback JID or if current chat name is numeric/ID
     const existingChat = await db.chat.findUnique({ where: { id: chatId } });
-    const isSelfChat = chatId.includes('905332760534') || chatId === '31933115404296@lid';
+    const isSelfChat = isSelfId(chatId);
     let resolvedChatName = chatName;
     if (!isGroup) {
       // In 1-on-1 chats:
       // If isFromMe: NEVER use senderName as chat name! The other party's name comes from contactResolver
       const contactName = contactResolver.getDisplayNameSync(chatId);
       if (contactName && !contactName.includes('@') && !/^\d{10,16}$/.test(contactName)) {
-        if (isSelfChat || contactName !== 'Muzaffer') {
+        if (isSelfChat || !isSelfName(contactName)) {
           resolvedChatName = contactName;
         }
       } else if (!isFromMe && senderName && !senderName.includes('@') && !/^\d{10,16}$/.test(senderName)) {
-        if (isSelfChat || senderName !== 'Muzaffer') {
+        if (isSelfChat || !isSelfName(senderName)) {
           resolvedChatName = senderName;
         }
       }
     }
     const isCurrentNameNumeric = existingChat && (/^\d{10,16}$/.test(existingChat.name) || existingChat.name.includes('@'));
-    const isCurrentNameCorrupted = existingChat && existingChat.name === 'Muzaffer' && !isSelfChat;
+    const isCurrentNameCorrupted = existingChat && isSelfName(existingChat.name) && !isSelfChat;
     const shouldUpdateName = resolvedChatName && 
       !resolvedChatName.includes('@') && 
       !/^\d{10,16}$/.test(resolvedChatName) && 
-      (isSelfChat || resolvedChatName !== 'Muzaffer') &&
+      (isSelfChat || !isSelfName(resolvedChatName)) &&
       (!existingChat || isCurrentNameNumeric || isCurrentNameCorrupted);
 
     await db.chat.upsert({

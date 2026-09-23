@@ -1,14 +1,14 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../../src/lib/prisma';
+import { systemDb } from '../lib/tenant';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-change-in-production';
 const JWT_EXPIRES_IN = '7d';
 
 export const authService = {
   async login(username: string, passwordString: string) {
-    const user = await prisma.user.findUnique({ where: { username } });
-    if (!user) {
+    const user = await systemDb().user.findUnique({ where: { username } });
+    if (!user || !user.isActive) {
       throw new Error('Geçersiz kullanıcı adı veya şifre');
     }
 
@@ -23,8 +23,8 @@ export const authService = {
       { expiresIn: JWT_EXPIRES_IN }
     );
 
-    const { passwordHash, ...userWithoutPassword } = user;
-    return { token, user: userWithoutPassword };
+    const { id, role, displayName, isActive, createdAt, updatedAt } = user;
+    return { token, user: { id, username: user.username, role, displayName, isActive, createdAt, updatedAt } };
   },
 
   verifyToken(token: string) {

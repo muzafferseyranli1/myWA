@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { forEachTenant, listTenants, runWithTenant } from '../lib/tenant';
 import { processInbox, processOutbox, runScheduler } from './delivery.service';
 import { wahaService } from './waha.service';
 import { contactResolver } from './contact-resolver.service';
@@ -32,7 +33,8 @@ function loop(name: string, interval: number, action: () => Promise<unknown>, ma
   };
   run();
 }
-export async function startWorkers() {
+/** Verifies that one tenant's schema is migrated and warms its contact cache. */
+export async function prepareTenant() {
   await prisma.$queryRaw`SELECT id FROM incoming_events LIMIT 1`;
   await prisma.$queryRaw`SELECT id FROM outgoing_jobs LIMIT 1`;
   await prisma.$queryRaw`SELECT day FROM scheduler_runs LIMIT 1`;
@@ -40,13 +42,21 @@ export async function startWorkers() {
   await prisma.$queryRaw`SELECT ack,preview FROM messages LIMIT 1`;
   await prisma.$queryRaw`SELECT session FROM sync_states LIMIT 1`;
   await prisma.$queryRaw`SELECT user_id FROM message_reads LIMIT 1`;
-  await contactResolver.loadFromDatabase();
+  await contactResolver.ready;
+}
+export async function startWorkers() {
+  for (const tenant of listTenants()) {
+    // One broken tenant schema must not keep every other user offline.
+    try { await runWithTenant(tenant, prepareTenant); }
+    catch (error: any) { console.error(`[workers] Tenant ${tenant.username} is not ready:`, error.code || error.message); }
+  }
   stopped = false; started = true;
-  loop('inbox', 250, processInbox);
-  loop('outbox', 1000, processOutbox);
-  loop('scheduler', 30000, () => runScheduler());
-  loop('waha', 15000, () => wahaService.reconcile());
-  loop('history', 3000, syncHistory, 60000);
+  // Each iteration visits every tenant inside that tenant's own context.
+  loop('inbox', 250, () => forEachTenant(processInbox));
+  loop('outbox', 1000, () => forEachTenant(processOutbox));
+  loop('scheduler', 30000, () => forEachTenant(() => runScheduler()));
+  loop('waha', 15000, () => forEachTenant(() => wahaService.reconcile()));
+  loop('history', 3000, () => forEachTenant(syncHistory), 60000);
 }
 export function workersReady() {
   return started && !stopped && ['inbox', 'outbox', 'scheduler'].every(name => Date.now() - (beats.get(name) || 0) < 120000);

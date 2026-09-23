@@ -1,4 +1,6 @@
 import { prisma } from '../lib/prisma';
+import { runWithTenant, tenantScoped } from '../lib/tenant';
+import { isSelfId, isSelfName } from '../lib/self';
 
 /**
  * LID ↔ JID çözümleyici servis.
@@ -6,7 +8,6 @@ import { prisma } from '../lib/prisma';
  * Bu servis LID'leri gerçek JID'lere çevirir ve mention için doğru formatı üretir.
  */
 export class ContactResolverService {
-  private static instance: ContactResolverService;
   // In-memory LID → JID cache
   private lidToJidMap: Map<string, string> = new Map();
   // In-memory Phone / JID → LID cache
@@ -16,14 +17,11 @@ export class ContactResolverService {
   // In-memory identifier → Avatar URL cache
   private avatarCache: Map<string, string> = new Map();
 
-  private constructor() {}
+  /** Resolves once the tenant's contacts have been loaded from the database. */
+  public ready: Promise<void> = Promise.resolve();
 
-  public static getInstance(): ContactResolverService {
-    if (!ContactResolverService.instance) {
-      ContactResolverService.instance = new ContactResolverService();
-    }
-    return ContactResolverService.instance;
-  }
+  public constructor() {}
+
 
   public isLid(identifier: string): boolean {
     if (!identifier) return false;
@@ -78,13 +76,13 @@ export class ContactResolverService {
         select: { id: true, lidId: true, phoneNumber: true, pushName: true, displayName: true, avatarUrl: true }
       });
       for (const c of contacts) {
-        const isSelf = c.id.includes('905332760534') || c.id === '31933115404296@lid' || c.phoneNumber === '905332760534';
+        const isSelf = isSelfId(c.id) || isSelfId(c.phoneNumber);
         let name = c.displayName || c.pushName;
-        if (!isSelf && name === 'Muzaffer') {
-          name = (c.pushName !== 'Muzaffer' ? c.pushName : null) || null;
+        if (!isSelf && isSelfName(name)) {
+          name = (!isSelfName(c.pushName) ? c.pushName : null) || null;
         }
 
-        if (name && (isSelf || name !== 'Muzaffer')) {
+        if (name && (isSelf || !isSelfName(name))) {
           this.cacheContactName(c.id, name);
           if (c.phoneNumber && !this.isLid(c.phoneNumber)) {
             this.cacheContactName(c.phoneNumber, name);
@@ -123,11 +121,11 @@ export class ContactResolverService {
 
       // Çift yönlü isim ve numara eşleme: LID ile JID arasındaki isimleri senkronize et
       for (const [lid, jid] of this.lidToJidMap.entries()) {
-        const isSelf = lid === '31933115404296@lid' || jid.includes('905332760534');
+        const isSelf = isSelfId(lid) || isSelfId(jid);
         const nameFromLid = this.getDisplayNameSync(lid);
         const nameFromJid = this.getDisplayNameSync(jid);
         let bestName = nameFromLid || nameFromJid;
-        if (!isSelf && bestName === 'Muzaffer') {
+        if (!isSelf && isSelfName(bestName)) {
           bestName = null;
         }
         if (bestName) {
@@ -536,4 +534,12 @@ export class ContactResolverService {
   }
 }
 
-export const contactResolver = ContactResolverService.getInstance();
+/**
+ * Name/LID caches of the tenant active in the current context. Each tenant has
+ * its own instance, loaded from its own schema on first use.
+ */
+export const contactResolver = tenantScoped('contacts', tenant => {
+  const resolver = new ContactResolverService();
+  resolver.ready = runWithTenant(tenant, () => resolver.loadFromDatabase());
+  return resolver;
+});

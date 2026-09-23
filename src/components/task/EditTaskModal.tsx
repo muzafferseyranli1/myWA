@@ -148,8 +148,8 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="w-full max-w-md rounded-lg bg-[#e9edef] border border-[#e9edef] flex flex-col my-auto max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 overflow-y-auto">
+      <div className="w-full max-w-md rounded-lg bg-[#e9edef] border border-[#e9edef] flex flex-col my-auto max-h-[90dvh]">
         <div className="flex items-center justify-between border-b border-[#e9edef] p-4">
           <h2 className="text-lg font-medium text-[#111b21]">Görevi Düzenle</h2>
           <button onClick={onClose} className="text-[#667781] hover:text-[#111b21]">
