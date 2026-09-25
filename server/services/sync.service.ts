@@ -8,7 +8,11 @@ import { contactResolver } from './contact-resolver.service';
 import { currentTenant, tenantScoped } from '../lib/tenant';
 
 // Discovery cursor and avatar back-off are kept per tenant.
-const state = tenantScoped('sync', () => ({ discoveryOffset: 0, avatarChecked: new Map<string, number>() }));
+const state = tenantScoped('sync', () => ({ discoveryOffset: 0, avatarChecked: new Map<string, number>(), fullScanAt: 0 }));
+// WhatsApp delivers the pre-link history to the store minutes after pairing, with
+// old timestamps the incremental cursor has already passed. A periodic round
+// from timestamp 0 picks those up; already imported messages are deduplicated.
+const FULL_SCAN_INTERVAL = 30 * 60 * 1000;
 
 /**
  * Eksik profil resmi olan sohbetlerin avatarlarını arka planda WAHA'dan çeker
@@ -88,7 +92,11 @@ export async function syncHistory() {
   const session = currentTenant().session;
   let sync = await prisma.syncState.upsert({ where: { session }, create: { session }, update: {} });
   try {
-    if (!sync.roundUntil) sync = await prisma.syncState.update({ where: { session }, data: { roundUntil: Math.floor(Date.now()/1000), offset: 0 } });
+    if (!sync.roundUntil) {
+      const full = Date.now() - state.fullScanAt > FULL_SCAN_INTERVAL;
+      if (full) state.fullScanAt = Date.now();
+      sync = await prisma.syncState.update({ where: { session }, data: { roundUntil: Math.floor(Date.now()/1000), offset: 0, ...(full ? { completedUntil: 0 } : {}) } });
+    }
     const messages = await wahaService.getHistory(sync.offset, Math.max(0, sync.completedUntil - 120), sync.roundUntil!);
     if (!Array.isArray(messages)) throw new Error('Unexpected history response');
     // Persist each page before advancing its durable cursor. Replaying an
