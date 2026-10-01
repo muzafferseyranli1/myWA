@@ -8,6 +8,8 @@ import { contactResolver } from './contact-resolver.service';
 import { urlShortenerService } from './url-shortener.service';
 import { mediaService } from './media.service';
 import { currentTenant } from '../lib/tenant';
+import { getNotificationSettings } from '../lib/notification-settings';
+import { isWeekend, quietUntil } from '../lib/quiet-hours';
 import { classifySendError, eventKey, istanbulDay, parseMessage, reminderDue, retryDelay, isStatusOrBroadcast } from '../lib/reliability';
 
 type DB = Prisma.TransactionClient;
@@ -16,16 +18,23 @@ export const notificationView = (job: OutgoingJob) => ({
   attempts: job.attempts, lastError: job.lastError, createdAt: job.createdAt, updatedAt: job.updatedAt,
 });
 export async function enqueue(db: DB, data: { operationKey: string; chatId: string; taskId?: string; kind: string; payload: Prisma.InputJsonValue }) {
+  // Anything queued during quiet hours waits for them to end. Scheduled
+  // summaries (they carry a day) are only queued once quiet time is over.
+  const settings = await getNotificationSettings();
+  const wake = (data.payload as any)?.day ? null : quietUntil(new Date(), settings);
+  const delaySeconds = wake ? Math.max(0, (wake.getTime() - Date.now()) / 1000) : 0;
   const rows = await db.$queryRaw<{ id: string }[]>`INSERT INTO outgoing_jobs
-    (id,operation_key,chat_id,task_id,kind,payload,updated_at)
-    VALUES (${randomUUID()},${data.operationKey},${data.chatId},${data.taskId || null},${data.kind},${JSON.stringify(data.payload)}::jsonb,NOW())
+    (id,operation_key,chat_id,task_id,kind,payload,updated_at,next_attempt_at)
+    VALUES (${randomUUID()},${data.operationKey},${data.chatId},${data.taskId || null},${data.kind},${JSON.stringify(data.payload)}::jsonb,NOW(),NOW() + make_interval(secs => ${delaySeconds}::double precision))
     ON CONFLICT (operation_key) DO UPDATE SET operation_key = EXCLUDED.operation_key RETURNING id`;
   return db.outgoingJob.findUniqueOrThrow({ where: { id: rows[0].id } });
 }
+/** Assignees that have not closed their part of the task yet. */
+export const pendingAssignees = (task: any): any[] => (task.assignees || []).filter((a: any) => !a.completedAt);
 export function taskPayload(
   task: any,
   kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED' | 'TASK_CREATED_DM',
-  extra?: { reason?: string; by?: string; groupName?: string; recipientName?: string }
+  extra?: { reason?: string; by?: string; groupName?: string; recipientName?: string; assigneeId?: string; completedAssignee?: string }
 ) {
   const mentions: string[] = [];
   const tags = task.assignees?.map((a: any) => {
@@ -34,7 +43,7 @@ export function taskPayload(
     return resolved.tag;
   }).filter(Boolean).join(' ') || '';
   const date = task.dueDate ? new Date(task.dueDate).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' }) : 'Belirtilmedi';
-  const taskUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+  const taskUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}${extra?.assigneeId ? `?a=${extra.assigneeId}` : ''}`;
 
   const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
   const cleanDescription = task.description ? contactResolver.formatMentionsToNamesSync(task.description) : '';
@@ -65,6 +74,27 @@ export function taskPayload(
     }
     text += `\n🔗 Görevi incele: ${taskUrl}`;
     return { text, mentions: [], url: taskUrl, linkPreview: false };
+  }
+
+  if (kind === 'TASK_COMPLETED' && extra?.completedAssignee) {
+    // One of several assignees finished their part; the task itself stays open.
+    const pendingMentions: string[] = [];
+    const pending = pendingAssignees(task).map((a: any) => {
+      const resolved = contactResolver.resolveAssigneeMention(a.contact);
+      if (resolved.jid) pendingMentions.push(resolved.jid);
+      return resolved.tag;
+    }).filter(Boolean).join(' ');
+    text = `✅ *${extra.completedAssignee} görevini tamamladı*
+
+*${cleanTitle}*
+`;
+    if (task.completionNote) text += `
+📝 *Kapanış notu:* ${task.completionNote}
+`;
+    text += `
+⏳ *Henüz tamamlamayanlar:* ${pending}
+`;
+    return { text: text.trim(), mentions: [...new Set(pendingMentions)], replyTo: task.sourceMessageId || undefined, linkPreview: false };
   }
 
   if (kind === 'TASK_COMPLETED') {
@@ -252,7 +282,7 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
     ) => {
       if (!taskList.length) return;
       const lines = await Promise.all(taskList.map(async (task, idx) => {
-        const tags = task.assignees.map(a => {
+        const tags = pendingAssignees(task).map(a => {
           const resolved = contactResolver.resolveAssigneeMention(a.contact);
           if (resolved.jid) mentions.add(resolved.jid);
           return resolved.tag;
@@ -300,7 +330,7 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
     if (payload.day && payload.day !== istanbulDay()) return null;
     const tasks = await prisma.task.findMany({
       where: { id: { in: payload.taskIds }, status: { not: 'DONE' } },
-      include: { chat: true }
+      include: { chat: true, assignees: true }
     });
     if (!tasks.length) return null;
 
@@ -315,7 +345,8 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
     const textList = await Promise.all(tasks.map(async (task, idx) => {
       const groupName = task.chat?.name ? ` (${task.chat.name})` : '';
       const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
-      const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+      const mine = task.assignees.find(a => a.contactId === payload.contactId);
+      const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}${mine ? `?a=${mine.id}` : ''}`;
       const shortLink = await urlShortenerService.shortenUrl(rawUrl);
 
       let timeBadge = '';
@@ -346,6 +377,7 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
     };
   }
 
+  if ((job.kind === 'GREETING' || job.kind === 'CLOSING') && payload.day && payload.day !== istanbulDay()) return null;
   let text = payload.text || '';
   if (payload.url) {
     const shortLink = await urlShortenerService.shortenUrl(payload.url);
@@ -422,16 +454,22 @@ export async function queueReminders(db: DB, scope: string, chatId?: string, day
 
   const groups = new Map<string, string[]>();
   for (const task of tasks) groups.set(task.chatId, [...(groups.get(task.chatId) || []), task.id]);
-  for (const [chat, taskIds] of groups) await enqueue(db, {
-    operationKey: day ? `reminder:${day}:${scope}:${chat}` : `reminder:${randomUUID()}`,
-    chatId: chat, taskId, kind: 'REMINDER', payload: { taskIds, ...(day ? { day } : {}) },
-  });
+  const chatNames = new Map(tasks.map(t => [t.chatId, t.chat?.name]));
+  for (const [chat, taskIds] of groups) {
+    // Scheduled summaries open with a greeting (everyone is mentioned in groups).
+    if (day) await enqueueFraming(db, 'GREETING', day, chat, chat.endsWith('@g.us') ? undefined : chatNames.get(chat) || undefined);
+    await enqueue(db, {
+      operationKey: day ? `reminder:${day}:${scope}:${chat}` : `reminder:${randomUUID()}`,
+      chatId: chat, taskId, kind: 'REMINDER', payload: { taskIds, ...(day ? { day } : {}) },
+    });
+  }
 
   // Direct DM reminders for assignees whose tasks have notifyAssigneesDirectly === true
   const directAssigneeTasks = new Map<string, { contact: any; taskIds: string[] }>();
   for (const task of tasks) {
     if ((task as any).notifyAssigneesDirectly && task.assignees?.length) {
       for (const a of task.assignees) {
+        if (a.completedAt) continue; // already finished their part
         const dmChatId = contactResolver.resolveDirectChatId(a.contact);
         if (dmChatId && dmChatId !== task.chatId) {
           const entry = directAssigneeTasks.get(dmChatId) || { contact: a.contact, taskIds: [] };
@@ -446,23 +484,43 @@ export async function queueReminders(db: DB, scope: string, chatId?: string, day
 
   for (const [dmChatId, { contact, taskIds }] of directAssigneeTasks) {
     const recipientName = contact.displayName || contact.pushName || contactResolver.getDisplayNameSync(contact.id) || 'Görevli';
+    if (day) await enqueueFraming(db, 'GREETING', day, dmChatId, recipientName);
     await enqueue(db, {
       operationKey: day ? `reminder:dm:${day}:${scope}:${dmChatId}` : `reminder:dm:${randomUUID()}:${dmChatId}`,
       chatId: dmChatId, taskId, kind: 'REMINDER_DM',
-      payload: { taskIds, recipientName, ...(day ? { day } : {}) },
+      payload: { taskIds, recipientName, contactId: contact.id, ...(day ? { day } : {}) },
     });
   }
 
   return { queued: tasks.length, sent: 0, chats: groups.size, directDMs: directAssigneeTasks.size };
 }
+/** "Günaydın" before and a sign-off after a scheduled summary; weekends differ from weekdays. */
+async function enqueueFraming(db: DB, kind: 'GREETING' | 'CLOSING', day: string, chatId: string, name?: string) {
+  const group = chatId.endsWith('@g.us');
+  const text = kind === 'GREETING'
+    ? `${group ? '@all' : name ? `@${name.trim().replace(/^@/, '')}` : ''} Günaydın ☀️`.trim()
+    : isWeekend() ? 'İyi hafta sonları 🌳' : 'Kolay gelsin 🤝';
+  await enqueue(db, {
+    operationKey: `${kind.toLowerCase()}:${day}:${chatId}`,
+    chatId, kind, payload: { text, mentions: kind === 'GREETING' && group ? ['all'] : [], day, linkPreview: false },
+  });
+}
+async function queueClosings(db: DB, day: string) {
+  const jobs = await db.outgoingJob.findMany({
+    where: { kind: { in: ['REMINDER', 'REMINDER_DM'] }, OR: [{ operationKey: { startsWith: `reminder:${day}:` } }, { operationKey: { startsWith: `reminder:dm:${day}:` } }] },
+    select: { chatId: true },
+  });
+  for (const chatId of new Set(jobs.map(j => j.chatId))) await enqueueFraming(db, 'CLOSING', day, chatId);
+}
 export async function runScheduler(now = new Date()) {
-  if (!reminderDue(now)) return;
+  if (!reminderDue(now, await getNotificationSettings())) return;
   const day = istanbulDay(now);
   await prisma.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(9183060)`;
     if (await tx.schedulerRun.findUnique({ where: { day } })) return;
     await queueReminders(tx, 'overdue', undefined, day);
     await queueReminders(tx, 'due_soon', undefined, day);
+    await queueClosings(tx, day);
     await tx.schedulerRun.create({ data: { day } });
   });
 }

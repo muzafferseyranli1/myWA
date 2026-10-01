@@ -77,6 +77,9 @@ export interface TaskAssigneeItem {
   taskId: string;
   contactId: string;
   contact: ContactItem;
+  completedAt?: string | null;
+  completedBy?: string | null;
+  completionNote?: string | null;
 }
 
 export interface CreateTaskRequest {

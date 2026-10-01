@@ -198,6 +198,14 @@ export class WAHAService {
       });
       return await response.json();
     } catch (err: any) {
+      if (mentions?.includes('all')) {
+        // Not every engine accepts the "mention everyone" keyword; send the text without it.
+        console.warn(`[WAHA] sendMessage with mentions=["all"] failed (${err?.message || err}). Retrying without mentions...`);
+        delete body.mentions;
+        try {
+          return await (await this.request(`${this.baseUrl}/api/sendText`, { method: 'POST', body: JSON.stringify(body) })).json();
+        } catch (retryErr: any) { throw retryErr; }
+      }
       if (replyTo) {
         console.warn(`[WAHA] sendMessage with reply_to=${replyTo} failed (${err?.message || err}). Retrying without reply_to...`);
         delete body.reply_to;

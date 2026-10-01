@@ -3,6 +3,8 @@
 import { useState, useEffect, use, useCallback } from 'react';
 import { CheckCircle2, Clock, AlertTriangle, User, MessageSquare, ArrowLeft, Send, Check } from 'lucide-react';
 
+const nameOf = (a: any) => a.contact?.displayName || a.contact?.pushName || a.contact?.phoneNumber || a.contactId?.split('@')[0] || '';
+
 export default function PublicTaskClosePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [task, setTask] = useState<any>(null);
@@ -11,6 +13,7 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
 
   // Form states
   const [completedBy, setCompletedBy] = useState('');
+  const [assigneeId, setAssigneeId] = useState('');
   const [completionNote, setCompletionNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -26,10 +29,13 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
       const data = await res.json();
       setTask(data);
 
-      // Pre-fill completedBy with first assignee if available
-      if (data.assignees && data.assignees.length > 0) {
-        const first = data.assignees[0].contact;
-        setCompletedBy(first?.pushName || first?.displayName || first?.phoneNumber || '');
+      // Pre-select the assignee: the one the link was sent to, or the only one left.
+      const pending = (data.assignees || []).filter((a: any) => !a.completedAt);
+      const fromLink = new URLSearchParams(window.location.search).get('a');
+      const me = pending.find((a: any) => a.id === fromLink) || (pending.length === 1 ? pending[0] : null);
+      if (me) {
+        setAssigneeId(me.id);
+        setCompletedBy(nameOf(me));
       }
     } catch (err: any) {
       setError(err.message || 'Bilinmeyen bir hata oluştu');
@@ -42,6 +48,10 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
 
   const handleCloseTask = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (hasAssignees && !assigneeId) {
+      alert('Lütfen kendi adınızı seçiniz.');
+      return;
+    }
     if (!completionNote.trim()) {
       alert('Lütfen görev bitirme notunu giriniz.');
       return;
@@ -54,7 +64,8 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           completionNote: completionNote.trim(),
-          completedBy: completedBy.trim() || undefined
+          completedBy: completedBy.trim() || undefined,
+          assigneeId: assigneeId || undefined
         })
       });
 
@@ -96,6 +107,9 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
   }
 
   const isDone = task.status === 'DONE';
+  const assignees: any[] = task.assignees || [];
+  const hasAssignees = assignees.length > 0;
+  const pendingAssignees = assignees.filter(a => !a.completedAt);
   const priorityLabels: Record<string, { label: string; color: string }> = {
     LOW: { label: 'Düşük', color: 'text-green-400 bg-green-400/10 border-green-400/20' },
     MEDIUM: { label: 'Orta', color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' },
@@ -123,7 +137,7 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
         {success && (
           <div className="rounded-xl bg-[#00A884]/15 border border-[#00A884]/40 p-4 text-center animate-fade-in">
             <CheckCircle2 className="h-10 w-10 text-[#00A884] mx-auto mb-2" />
-            <h3 className="font-semibold text-base text-[#00A884]">Görev Başarıyla Kapatıldı!</h3>
+            <h3 className="font-semibold text-base text-[#00A884]">{isDone ? 'Görev Başarıyla Kapatıldı!' : 'Göreviniz Kapatıldı!'}</h3>
             <p className="text-xs text-[#D1D7DB] mt-1">
               WhatsApp grubuna kapanış notunuz ve bildirim başarıyla iletildi.
             </p>
@@ -160,11 +174,11 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
               <span className="text-xs text-[#667781] block mb-1.5 font-medium">👥 Görevliler</span>
               <div className="flex flex-wrap gap-1.5">
                 {task.assignees.map((a: any) => {
-                  const name = a.contact?.pushName || a.contact?.displayName || a.contact?.phoneNumber || a.contactId?.split('@')[0];
+                  const name = nameOf(a);
                   return (
                     <span key={a.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#ffffff] border border-[#e9edef] text-xs text-[#D1D7DB]">
-                      <User className="h-3 w-3 text-[#00A884]" />
-                      {name}
+                      {a.completedAt ? <Check className="h-3 w-3 text-[#00A884]" /> : <User className="h-3 w-3 text-[#00A884]" />}
+                      {name}{a.completedAt ? ' · tamamladı' : ' · bekliyor'}
                     </span>
                   );
                 })}
@@ -235,18 +249,38 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
               </p>
             </div>
 
-            <div>
-              <label className="block text-xs text-[#667781] mb-1 font-medium">
-                Adınız / Kapatan Kişi
-              </label>
-              <input
-                type="text"
-                value={completedBy}
-                onChange={(e) => setCompletedBy(e.target.value)}
-                placeholder="Örn: Ahmet Yılmaz"
-                className="w-full rounded-lg bg-[#ffffff] border border-[#e9edef] px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00A884]"
-              />
-            </div>
+            {hasAssignees ? (
+              <div>
+                <label className="block text-xs text-[#667781] mb-1 font-medium">
+                  Kim olarak kapatıyorsunuz?
+                </label>
+                <select
+                  value={assigneeId}
+                  onChange={(e) => {
+                    setAssigneeId(e.target.value);
+                    const picked = pendingAssignees.find(a => a.id === e.target.value);
+                    setCompletedBy(picked ? nameOf(picked) : '');
+                  }}
+                  className="w-full rounded-lg bg-[#ffffff] border border-[#e9edef] px-3 py-2 text-sm text-[#111b21] focus:outline-none focus:border-[#00A884]"
+                >
+                  <option value="">Seçiniz...</option>
+                  {pendingAssignees.map(a => <option key={a.id} value={a.id}>{nameOf(a)}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs text-[#667781] mb-1 font-medium">
+                  Adınız / Kapatan Kişi
+                </label>
+                <input
+                  type="text"
+                  value={completedBy}
+                  onChange={(e) => setCompletedBy(e.target.value)}
+                  placeholder="Örn: Ahmet Yılmaz"
+                  className="w-full rounded-lg bg-[#ffffff] border border-[#e9edef] px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00A884]"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs text-[#667781] mb-1 font-medium">
@@ -263,7 +297,7 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
             </div>
 
             <div className="rounded-lg bg-[#ffffff]/60 p-2.5 text-[11px] text-[#667781] border border-[#e9edef]/40">
-              ℹ️ Kapat butonuna bastığınızda, bu notla birlikte WhatsApp grubuna otomatik tamamlama mesajı gönderilecektir.
+              ℹ️ Kapat butonuna bastığınızda, bu notla birlikte WhatsApp grubuna otomatik tamamlama mesajı gönderilecektir.{pendingAssignees.length > 1 ? ' Görev, tüm görevliler kendi payını kapatınca tamamlanır.' : ''}
             </div>
 
             <button

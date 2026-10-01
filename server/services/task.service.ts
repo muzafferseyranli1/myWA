@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
-import { enqueue, taskPayload, notificationView } from './delivery.service';
+import { enqueue, taskPayload, notificationView, pendingAssignees } from './delivery.service';
 import { contactResolver } from './contact-resolver.service';
 
 const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true };
@@ -14,14 +14,17 @@ async function queueTask(
   tx: Prisma.TransactionClient,
   task: any,
   kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED',
-  extra?: { reason?: string; by?: string }
+  extra?: { reason?: string; by?: string; completedAssignee?: string; assigneeId?: string }
 ) {
   const timestamp = kind === 'TASK_COMPLETED'
     ? (task.completedAt ? new Date(task.completedAt).toISOString() : new Date().toISOString())
     : kind === 'TASK_REACTIVATED'
     ? new Date().toISOString()
     : '';
-  const operationKey = timestamp ? `${kind}:${task.id}:${timestamp}` : `${kind}:${task.id}`;
+  // A partial completion is one notification per assignee close, not per task.
+  const operationKey = extra?.completedAssignee
+    ? `TASK_PARTIAL:${task.id}:${extra.assigneeId}:${new Date().toISOString()}`
+    : timestamp ? `${kind}:${task.id}:${timestamp}` : `${kind}:${task.id}`;
   await enqueue(tx, {
     operationKey,
     chatId: task.chatId,
@@ -45,6 +48,7 @@ async function queueTask(
           payload: taskPayload(task, 'TASK_CREATED_DM', {
             groupName: task.chat?.name || undefined,
             recipientName: a.contact?.displayName || a.contact?.pushName || undefined,
+            assigneeId: a.id,
           }),
         });
       }
@@ -89,12 +93,24 @@ export const taskService = {
       await tx.$queryRaw`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`;
       const previous = await tx.task.findUniqueOrThrow({ where: { id }, include });
       if (data.assigneeIds !== undefined) {
-        await tx.taskAssignee.deleteMany({ where: { taskId: id } });
-        await tx.taskAssignee.createMany({ data: [...new Set(data.assigneeIds)].map(contactId => ({ taskId: id, contactId })) });
+        // Keep each remaining assignee's own completion state.
+        const ids = [...new Set(data.assigneeIds)];
+        await tx.taskAssignee.deleteMany({ where: { taskId: id, contactId: { notIn: ids } } });
+        await tx.taskAssignee.createMany({ data: ids.map(contactId => ({ taskId: id, contactId })), skipDuplicates: true });
       }
 
       const isCompleting = data.status === 'DONE' && previous.status !== 'DONE';
       const isReactivating = previous.status === 'DONE' && data.status && data.status !== 'DONE';
+
+      if (isCompleting) {
+        await tx.taskAssignee.updateMany({ where: { taskId: id, completedAt: null }, data: {
+          completedAt: new Date(),
+          completedBy: data.completedBy?.trim() || 'Yönetici',
+          completionNote: data.completionNote?.trim() || 'Admin tarafından tamamlandı'
+        } });
+      } else if (isReactivating) {
+        await tx.taskAssignee.updateMany({ where: { taskId: id }, data: { completedAt: null, completedBy: null, completionNote: null } });
+      }
 
       const updated = await tx.task.update({ where: { id }, data: {
         ...(data.title !== undefined ? { title: contactResolver.formatMentionsToNamesSync(data.title.trim()) } : {}),
@@ -131,11 +147,32 @@ export const taskService = {
     });
     return attachNotification(task);
   },
-  async closeTask(id: string, data: { completionNote: string; completedBy?: string }) {
+  /**
+   * Closes the task for one assignee. With several assignees the task only
+   * becomes DONE once every one of them has closed their own part.
+   */
+  async closeTask(id: string, data: { completionNote: string; completedBy?: string; assigneeId?: string }) {
     const task = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`;
       const previous = await tx.task.findUniqueOrThrow({ where: { id }, include });
       if (previous.status === 'DONE') return previous;
+      if (previous.assignees.length) {
+        const pending = pendingAssignees(previous);
+        const me = data.assigneeId ? previous.assignees.find(a => a.id === data.assigneeId) : pending.length === 1 ? pending[0] : undefined;
+        if (!me) throw new Error('Görevi kapatan kişi seçilmelidir');
+        if (me.completedAt) return previous;
+        const name = me.contact?.displayName || me.contact?.pushName || contactResolver.getDisplayNameSync(me.contact?.id) || me.contact?.phoneNumber || 'Görevli';
+        const closer = data.completedBy?.trim() || name;
+        await tx.taskAssignee.update({ where: { id: me.id }, data: { completedAt: new Date(), completedBy: closer, completionNote: data.completionNote } });
+        const refreshed = await tx.task.findUniqueOrThrow({ where: { id }, include });
+        if (!pendingAssignees(refreshed).length) {
+          const done = await tx.task.update({ where: { id }, data: { status: 'DONE', completionNote: data.completionNote, completedBy: closer, completedAt: new Date() }, include });
+          await queueTask(tx, done, 'TASK_COMPLETED');
+          return done;
+        }
+        await queueTask(tx, { ...refreshed, completionNote: data.completionNote }, 'TASK_COMPLETED', { completedAssignee: closer, assigneeId: me.id });
+        return refreshed;
+      }
       const updated = await tx.task.update({ where: { id }, data: { status: 'DONE', completionNote: data.completionNote, completedBy: data.completedBy || null, completedAt: new Date() }, include });
       await queueTask(tx, updated, 'TASK_COMPLETED');
       return updated;

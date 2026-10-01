@@ -70,7 +70,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [daysDue, setDaysDue] = useState<number | null>(3);
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
   const [notifyOnCreate, setNotifyOnCreate] = useState(true);
-  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(false);
+  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const priorityOptions: { key: TaskPriority; label: string; color: string }[] = [

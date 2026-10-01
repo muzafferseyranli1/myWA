@@ -123,7 +123,7 @@ router.get('/:id/public', publicTask(async (req, res) => {
 router.post('/:id/close', publicTask(async (req, res) => {
   try {
     const taskId = String(req.params.id);
-    const { completionNote, completedBy } = req.body;
+    const { completionNote, completedBy, assigneeId } = req.body;
 
     if (typeof completionNote !== 'string' || !completionNote.trim() || completionNote.length > 20000) {
       return res.status(400).json({ error: 'Görev bitirme notu zorunludur' });
@@ -131,13 +131,14 @@ router.post('/:id/close', publicTask(async (req, res) => {
 
     const task = await taskService.closeTask(taskId, {
       completionNote: completionNote.trim(),
-      completedBy: completedBy ? String(completedBy).trim() : undefined
+      completedBy: completedBy ? String(completedBy).trim() : undefined,
+      assigneeId: typeof assigneeId === 'string' ? assigneeId : undefined
     });
 
     broadcastTaskUpdated(task);
     res.json({ success: true, task });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(error.message === 'Görevi kapatan kişi seçilmelidir' ? 400 : 500).json({ error: error.message });
   }
 }));
 

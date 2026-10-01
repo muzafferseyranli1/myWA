@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { X, Search, MessageSquareText } from 'lucide-react';
 import { newClientId } from '../../lib/client-id';
+import QuickDueDates from './QuickDueDates';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -41,7 +42,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
   const [dueDate, setDueDate] = useState('');
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [notifyOnCreate, setNotifyOnCreate] = useState(true);
-  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(false);
+  const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(true);
   const [searchContact, setSearchContact] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -158,12 +159,13 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
             <div>
               <label className="mb-1 block text-sm text-[#667781]">📅 Bitiş Tarihi</label>
+              <QuickDueDates value={dueDate} onPick={setDueDate} />
               <input 
                 type="date" 
                 value={dueDate} 
                 min={today}
                 onChange={e => setDueDate(e.target.value)} 
-                className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] [color-scheme:dark]" 
+                className="w-full rounded border border-[#d1d7db] bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] [color-scheme:light]" 
               />
             </div>
 

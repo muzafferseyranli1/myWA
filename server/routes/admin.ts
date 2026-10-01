@@ -3,6 +3,8 @@ import { requireAuth, requireAdmin } from '../middleware/auth';
 import { authService } from '../services/auth.service';
 import { wahaService } from '../services/waha.service';
 import { disconnectTenant } from '../sockets';
+import { getNotificationSettings, saveNotificationSettings } from '../lib/notification-settings';
+import { parseNotificationSettings } from '../lib/quiet-hours';
 import { loadTenants, provisionTenant, runWithTenant, systemDb, tenantForUser } from '../lib/tenant';
 
 /**
@@ -80,6 +82,17 @@ router.patch('/users/:id', async (req: any, res) => {
     console.error('[admin] Update user failed:', error.message);
     res.status(500).json({ error: 'Kullanıcı güncellenemedi' });
   }
+});
+
+// Quiet hours and summary times, shared by every user's notifications.
+router.get('/settings', async (_req, res) => {
+  try { res.json(await getNotificationSettings()); } catch { res.status(503).json({ error: 'Ayarlar alınamadı' }); }
+});
+router.put('/settings', async (req, res) => {
+  const settings = parseNotificationSettings(req.body);
+  if (typeof settings === 'string') return res.status(400).json({ error: settings });
+  try { await saveNotificationSettings(settings); res.json(settings); }
+  catch { res.status(500).json({ error: 'Ayarlar kaydedilemedi' }); }
 });
 
 export default router;

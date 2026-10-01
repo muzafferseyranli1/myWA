@@ -1,8 +1,9 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, UserPlus, KeyRound, Power, RefreshCw } from 'lucide-react';
+import { ArrowLeft, UserPlus, KeyRound, Power, RefreshCw, Moon } from 'lucide-react';
 
+type NotificationSettings = { enabled: boolean; quietStart: string; weekdayEnd: string; weekendEnd: string };
 type AdminUser = { id: string; username: string; displayName: string; role: string; isActive: boolean; provisioned: boolean; whatsapp: string | null; createdAt: string };
 
 function headers() { return { Authorization: 'Bearer ' + localStorage.getItem('mywa_token'), 'Content-Type': 'application/json' }; }
@@ -31,8 +32,23 @@ export default function AdminPage() {
   const usernameError = form.username && !USERNAME.test(form.username) ? 'Boşluk ve Türkçe karakter olmadan 3-32 karakter: harf, rakam, nokta, tire, alt çizgi' : '';
   const passwordError = form.password && form.password.length < 8 ? 'En az 8 karakter olmalı' : '';
 
+  const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const saveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!settings) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch('/api/admin/settings', { method: 'PUT', headers: headers(), body: JSON.stringify(settings) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Ayarlar kaydedilemedi');
+      setSettings(data); setNotice('Bildirim saatleri kaydedildi.');
+    } catch (err: any) { setError(err.message); } finally { setBusy(false); }
+  };
+
   const load = useCallback(async () => {
     try {
+      const s = await fetch('/api/admin/settings', { headers: headers() });
+      if (s.ok) setSettings(await s.json());
       const res = await fetch('/api/admin/users', { headers: headers() });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Kullanıcılar alınamadı');
       setUsers(await res.json());
@@ -117,6 +133,20 @@ export default function AdminPage() {
           </div>
           <button disabled={busy || !!usernameError || !!passwordError} className="mt-3 rounded-lg bg-[#00a884] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-50">{busy ? 'Hazırlanıyor…' : 'Oluştur'}</button>
         </form>
+
+        {settings && (
+          <form onSubmit={saveSettings} className="rounded-xl border border-[#e9edef] bg-white p-4">
+            <h2 className="mb-1 flex items-center gap-2 text-[14px] font-semibold"><Moon size={17} /> Bildirim saatleri</h2>
+            <p className="mb-3 text-[12px] leading-5 text-[#667781]">Yasaklı saatlerde oluşturulan görevlerin bildirimleri bekletilir ve gün başlayınca gönderilir. Günlük özet de gün başlangıç saatinde (hafta içi ve hafta sonu ayrı) gider.</p>
+            <label className="mb-3 flex items-center gap-2 text-[13px]"><input type="checkbox" className="h-4 w-4 accent-[#00a884]" checked={settings.enabled} onChange={e => setSettings({ ...settings, enabled: e.target.checked })} /> Yasaklı saat uygulansın</label>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-[#54656f]">Yasaklı saat başlangıcı</span><input type="time" required className={input} value={settings.quietStart} onChange={e => setSettings({ ...settings, quietStart: e.target.value })} /></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-[#54656f]">Hafta içi gün başlangıcı / özet</span><input type="time" required className={input} value={settings.weekdayEnd} onChange={e => setSettings({ ...settings, weekdayEnd: e.target.value })} /></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-[#54656f]">Hafta sonu gün başlangıcı / özet</span><input type="time" required className={input} value={settings.weekendEnd} onChange={e => setSettings({ ...settings, weekendEnd: e.target.value })} /></label>
+            </div>
+            <button disabled={busy} className="mt-3 rounded-lg bg-[#00a884] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-50">Kaydet</button>
+          </form>
+        )}
 
         <div className="overflow-x-auto rounded-xl border border-[#e9edef] bg-white">
           <table className="w-full text-left text-[13px]">

@@ -227,3 +227,50 @@ test('getDaysDiff and formatDateTR correctly compute relative days and Turkish d
 });
 
 
+
+test('partial TASK_COMPLETED names who finished and lists only those still pending', async () => {
+  const { taskPayload, pendingAssignees } = await import('../server/services/delivery.service');
+  const contact = (id: string, displayName: string) => ({ id, displayName, pushName: displayName, phoneNumber: id.split('@')[0] });
+  const task = {
+    id: 'task-456', title: 'Ortak Görev', priority: 'MEDIUM', dueDate: null, completionNote: 'Benim kısmım bitti',
+    assignees: [
+      { id: 'a1', contactId: '905000000001@c.us', contact: contact('905000000001@c.us', 'Ahmet'), completedAt: new Date() },
+      { id: 'a2', contactId: '905000000002@c.us', contact: contact('905000000002@c.us', 'Mehmet'), completedAt: null },
+      { id: 'a3', contactId: '905000000003@c.us', contact: contact('905000000003@c.us', 'Hüseyin'), completedAt: null },
+    ],
+  };
+  assert.deepEqual(pendingAssignees(task).map(a => a.id), ['a2', 'a3']);
+  const payload = taskPayload(task, 'TASK_COMPLETED', { completedAssignee: 'Ahmet', assigneeId: 'a1' });
+  assert.ok(payload.text.includes('Ahmet görevini tamamladı'));
+  // Pending people are @-mentioned (WhatsApp shows their names); the finisher is not.
+  const pendingLine = payload.text.split('Henüz tamamlamayanlar:')[1];
+  assert.ok(pendingLine.includes('@905000000002') && pendingLine.includes('@905000000003'));
+  assert.ok(!pendingLine.includes('905000000001'));
+  assert.deepEqual(payload.mentions.sort(), ['905000000002@s.whatsapp.net', '905000000003@s.whatsapp.net']);
+});
+
+test('quiet hours hold notifications until the day starts (weekend later than weekday)', async () => {
+  const { quietUntil, DEFAULT_NOTIFICATION_SETTINGS: s, parseNotificationSettings } = await import('../server/lib/quiet-hours');
+  const at = (iso: string) => quietUntil(new Date(iso), s)?.toISOString() ?? null;
+  assert.equal(at('2026-10-01T12:00:00Z'), null);                       // Thu 15:00 local
+  assert.equal(at('2026-10-01T19:00:00Z'), '2026-10-02T06:00:00.000Z'); // Thu 22:00 -> Fri 09:00
+  assert.equal(at('2026-10-02T04:00:00Z'), '2026-10-02T06:00:00.000Z'); // Fri 07:00 -> 09:00
+  assert.equal(at('2026-10-02T20:30:00Z'), '2026-10-03T08:00:00.000Z'); // Fri 23:30 -> Sat 11:00
+  assert.equal(at('2026-10-03T07:30:00Z'), '2026-10-03T08:00:00.000Z'); // Sat 10:30 -> 11:00
+  assert.equal(at('2026-10-04T20:00:00Z'), '2026-10-05T06:00:00.000Z'); // Sun 23:00 -> Mon 09:00
+  assert.equal(reminderDue(new Date('2026-10-03T07:59:00Z')), false);   // Sat 10:59
+  assert.equal(reminderDue(new Date('2026-10-03T08:00:00Z')), true);    // Sat 11:00
+  assert.equal(reminderDue(new Date('2026-10-02T19:00:00Z')), false);   // Fri 22:00: quiet again
+  assert.equal(quietUntil(new Date('2026-10-01T19:00:00Z'), { ...s, enabled: false }), null);
+  assert.equal(typeof parseNotificationSettings({ ...s, quietStart: '08:00' }), 'string');
+  assert.deepEqual(parseNotificationSettings(s), s);
+});
+
+test('quick due dates skip the weekend', async () => {
+  const { firstWorkingDay } = await import('../src/lib/due-date');
+  const sat = new Date(2026, 9, 3), thu = new Date(2026, 9, 1);
+  assert.equal(firstWorkingDay(0, sat), '2026-10-05'); // Saturday "today" -> Monday
+  assert.equal(firstWorkingDay(3, thu), '2026-10-05'); // Thursday + 3 = Sunday -> Monday
+  assert.equal(firstWorkingDay(1, thu), '2026-10-02');
+  assert.equal(firstWorkingDay(7, thu), '2026-10-08');
+});

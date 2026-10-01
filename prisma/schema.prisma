@@ -269,6 +269,9 @@ model TaskAssignee {
   id        String @id @default(uuid())
   taskId    String @map("task_id")
   contactId String @map("contact_id")
+  completedAt    DateTime? @map("completed_at")
+  completedBy    String?   @map("completed_by")
+  completionNote String?   @map("completion_note")
 
   task    Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -287,4 +290,11 @@ model TaskReminder {
 
   @@index([taskId])
   @@map("task_reminders")
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("app_settings")
 }

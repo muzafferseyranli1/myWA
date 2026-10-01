@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import QuickDueDates from './QuickDueDates';
 import { X, Trash2, Search, ExternalLink, Copy, Check, AlertCircle } from 'lucide-react';
 
 interface EditTaskModalProps {
@@ -263,7 +264,8 @@ export default function EditTaskModal({ isOpen, onClose, task, contacts, onTaskU
                   </button>
                 </div>
               </div>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884]" />
+              <QuickDueDates value={dueDate} onPick={setDueDate} />
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full rounded border border-[#d1d7db] bg-[#ffffff] p-2 text-sm text-[#111b21] focus:outline-none focus:ring-1 focus:ring-[#00A884] [color-scheme:light]" />
             </div>
 
             <div>

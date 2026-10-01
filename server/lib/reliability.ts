@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { DEFAULT_NOTIFICATION_SETTINGS, NotificationSettings, summaryDue } from './quiet-hours';
 
 export function verifySignature(body: Buffer, signature: unknown, algorithm: unknown, key: string): boolean {
   if (!key || (algorithm !== 'sha512' && algorithm !== 'sha256') || typeof signature !== 'string') return false;
@@ -63,8 +64,8 @@ export function parseMessage(payload: any) {
 export function istanbulDay(date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
-export function reminderDue(date = new Date()): boolean {
-  return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Istanbul', hour: '2-digit', hourCycle: 'h23' }).format(date)) >= 9;
+export function reminderDue(date = new Date(), settings: NotificationSettings = DEFAULT_NOTIFICATION_SETTINGS): boolean {
+  return summaryDue(date, settings);
 }
 export function retryDelay(attempt: number): number { return Math.min(900_000, 5000 * 2 ** Math.max(0, attempt - 1)); }
 export function classifySendError(error: any): 'RETRY' | 'FAILED' | 'UNKNOWN' {

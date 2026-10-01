@@ -1,3 +1,4 @@
+process.env.QUIET_HOURS = 'off'; // jobs must not wait for the real clock
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
