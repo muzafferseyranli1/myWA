@@ -25,7 +25,7 @@ MyWA; WhatsApp mesajlaşma altyapısını görev (Kanban) yönetimiyle birleşti
   - **Panel / CI-CD:** Coolify Dashboard (`http://188.132.198.144:8000`)
   - **Canlı Web Uygulaması:** `http://188.132.198.144:3060`
   - **Canlı Veritabanı:** PostgreSQL (`188.132.198.144:5433`)
-  - **WAHA Dashboard:** `http://188.132.198.144:3000/dashboard` (Kullanıcı: `admin` / Şifre: `MyWA_123`)
+  - **WAHA Dashboard:** `http://188.132.198.144:3000/dashboard` (Kullanıcı: `admin` / Şifre: `<WAHA_DASHBOARD_PASSWORD>`)
 
 ---
 
@@ -40,21 +40,21 @@ PORT=3060
 APP_URL="http://188.132.198.144:3060"
 
 # PostgreSQL Veritabanı (VPS Port 5433)
-DATABASE_URL="postgresql://mywa:MyWA_Secure_2026!@188.132.198.144:5433/mywa"
+DATABASE_URL="postgresql://mywa:<DB_PASSWORD>@188.132.198.144:5433/mywa"
 
 # JWT Token Gizli Anahtarı
-JWT_SECRET="mywa_jwt_production_secret_2026_super_key"
+JWT_SECRET="<JWT_SECRET>"
 
 # Panel Yönetici Giriş Bilgileri
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=<ADMIN_PASSWORD>
 
 # WAHA (WhatsApp HTTP API Mikroservisi)
 WAHA_API_URL=http://localhost:3000
 WAHA_SESSION_NAME=default
 WAHA_PORT=3000
 WAHA_DASHBOARD_USERNAME=admin
-WAHA_DASHBOARD_PASSWORD=MyWA_123
+WAHA_DASHBOARD_PASSWORD=<WAHA_DASHBOARD_PASSWORD>
 
 # Dosya Yükleme
 UPLOAD_DIR=./public/uploads
@@ -62,7 +62,7 @@ MAX_FILE_SIZE=50
 
 # Coolify Canlı Dağıtım Değişkenleri
 COOLIFY_HOST="http://188.132.198.144:8000"
-COOLIFY_TOKEN="1|h9uFOZlfwk5w7EUrve5X8TfdJQ3IXzevaX1xtuRK2217d5ec"
+COOLIFY_TOKEN="<COOLIFY_API_TOKEN>"
 COOLIFY_APP_UUID="tiadrkjgtdj1tet3ojuxegq4"
 ```
 
@@ -139,7 +139,7 @@ docker run -d --name mywa-waha -p 3000:3000 \
   -e WHATSAPP_DEFAULT_ENGINE=NOWEB \
   -e WAHA_DASHBOARD_ENABLED=true \
   -e WAHA_DASHBOARD_USERNAME=admin \
-  -e WAHA_DASHBOARD_PASSWORD=MyWA_123 \
+  -e WAHA_DASHBOARD_PASSWORD=<WAHA_DASHBOARD_PASSWORD> \
   -e WHATSAPP_HOOK_URL=http://host.docker.internal:3060/api/whatsapp/webhook \
   -e WHATSAPP_HOOK_EVENTS=message,message.any,session.status \
   -v waha_sessions:/app/.sessions \
@@ -149,7 +149,7 @@ docker run -d --name mywa-waha -p 3000:3000 \
 npm run dev
 ```
 
-> **Not:** Uygulama `http://localhost:3060` adresinde açılır (`admin` / `admin123`). WAHA Dashboard'a `http://localhost:3000/dashboard` adresinden erişebilirsiniz.
+> **Not:** Uygulama `http://localhost:3060` adresinde açılır (`admin` / `<ADMIN_PASSWORD>`). WAHA Dashboard'a `http://localhost:3000/dashboard` adresinden erişebilirsiniz.
 
 ---
 
@@ -183,7 +183,7 @@ servislerini başlatır ve birbirine otomatik bağlar.
      - `WHATSAPP_DEFAULT_ENGINE=NOWEB`
      - `WAHA_DASHBOARD_ENABLED=true`
      - `WAHA_DASHBOARD_USERNAME=admin`
-     - `WAHA_DASHBOARD_PASSWORD=MyWA_123`
+     - `WAHA_DASHBOARD_PASSWORD=<WAHA_DASHBOARD_PASSWORD>`
      - `WHATSAPP_HOOK_URL=http://188.132.198.144:3060/api/whatsapp/webhook`
      - `WHATSAPP_HOOK_EVENTS=message,message.any,session.status`
    - Persistent Storage: `waha_sessions` ➔ `/app/.sessions`

@@ -1,5 +1,5 @@
 const COOLIFY_HOST = 'http://188.132.198.144:8000';
-const COOLIFY_TOKEN = '1|h9uFOZlfwk5w7EUrve5X8TfdJQ3IXzevaX1xtuRK2217d5ec';
+const COOLIFY_TOKEN = process.env.COOLIFY_TOKEN;
 
 async function checkAllApps() {
   const res = await fetch(`${COOLIFY_HOST}/api/v1/applications`, {

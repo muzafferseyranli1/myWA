@@ -1,5 +1,5 @@
 const COOLIFY_HOST = 'http://188.132.198.144:8000';
-const COOLIFY_TOKEN = '1|h9uFOZlfwk5w7EUrve5X8TfdJQ3IXzevaX1xtuRK2217d5ec';
+const COOLIFY_TOKEN = process.env.COOLIFY_TOKEN;
 
 async function setupGithubApp() {
   const projectUuid = 'jnvy8xbsxk5s16492ntmpo9c';
@@ -43,12 +43,12 @@ async function setupGithubApp() {
   // Set environment variables
   console.log('\nSetting environment variables...');
   const envs = [
-    { key: 'DATABASE_URL', value: 'postgresql://mywa:MyWA_Secure_2026!@188.132.198.144:5433/mywa' },
+    { key: 'DATABASE_URL', value: process.env.DATABASE_URL },
     { key: 'PORT', value: '3060' },
     { key: 'NODE_ENV', value: 'production' },
-    { key: 'JWT_SECRET', value: 'mywa_jwt_production_secret_2026_super_key' },
+    { key: 'JWT_SECRET', value: process.env.JWT_SECRET },
     { key: 'ADMIN_USERNAME', value: 'admin' },
-    { key: 'ADMIN_PASSWORD', value: 'admin123' },
+    { key: 'ADMIN_PASSWORD', value: process.env.ADMIN_PASSWORD },
     { key: 'WA_SESSION_PATH', value: '/app/.baileys_auth' },
     { key: 'UPLOAD_DIR', value: '/app/public/uploads' },
     { key: 'MAX_FILE_SIZE', value: '50' }

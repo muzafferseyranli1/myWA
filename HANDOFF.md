@@ -29,11 +29,11 @@ Tüm servisler **VPS IP: `188.132.198.144`** üzerinde Docker konteynerleri olar
 | :--- | :--- | :--- |
 | **MyWA Web & API** | `http://188.132.198.144:3060` | Ana Next.js + Express web uygulaması. `/chat` ve `/kanban` |
 | **WAHA API** | `http://188.132.198.144:3065` | WhatsApp HTTP API. Oturum adı: `default` |
-| **WAHA Dashboard** | `http://188.132.198.144:3065/dashboard` | Kullanıcı: `admin` / Şifre: `MyWA_123` |
-| **WAHA API Key** | Header: `X-Api-Key` | `MyWA_ApiKey_2026!` |
-| **PostgreSQL DB** | `188.132.198.144:5433` | `postgresql://mywa:MyWA_Secure_2026!@188.132.198.144:5433/mywa` |
+| **WAHA Dashboard** | `http://188.132.198.144:3065/dashboard` | Kullanıcı: `admin` / Şifre: `<WAHA_DASHBOARD_PASSWORD>` |
+| **WAHA API Key** | Header: `X-Api-Key` | `<WAHA_API_KEY>` |
+| **PostgreSQL DB** | `188.132.198.144:5433` | `postgresql://mywa:<DB_PASSWORD>@188.132.198.144:5433/mywa` |
 | **Coolify Dashboard**| `http://188.132.198.144:8000` | Coolify Yönetim Paneli |
-| **Coolify API Token**| Bearer Token | `1\|h9uFOZlfwk5w7EUrve5X8TfdJQ3IXzevaX1xtuRK2217d5ec` |
+| **Coolify API Token**| Bearer Token | `<COOLIFY_API_TOKEN>` |
 | **Coolify Web App UUID** | `tiadrkjgtdj1tet3ojuxegq4` | `mywa-web` uygulaması |
 | **Coolify WAHA App UUID**| `mxnoyxmqujo9wk4t2tw46wnn` | `mywa-waha` uygulaması |
 
@@ -57,22 +57,22 @@ PORT=3060
 APP_URL="http://188.132.198.144:3060"
 
 # Veritabanı (VPS üzerindeki PostgreSQL)
-DATABASE_URL="postgresql://mywa:MyWA_Secure_2026!@188.132.198.144:5433/mywa"
+DATABASE_URL="postgresql://mywa:<DB_PASSWORD>@188.132.198.144:5433/mywa"
 
 # JWT Gizli Anahtarı
-JWT_SECRET="mywa_jwt_production_secret_2026_super_key"
+JWT_SECRET="<JWT_SECRET>"
 
 # Yönetici Girişi (Varsayılan Seed)
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=<ADMIN_PASSWORD>
 
 # WAHA Entegrasyonu
 WAHA_API_URL="http://188.132.198.144:3065"
 WAHA_SESSION_NAME="default"
-WAHA_API_KEY="MyWA_ApiKey_2026!"
-WAHA_WEBHOOK_SECRET="MyWA_ApiKey_2026!"
+WAHA_API_KEY="<WAHA_API_KEY>"
+WAHA_WEBHOOK_SECRET="<WAHA_WEBHOOK_SECRET>"
 WAHA_DASHBOARD_USERNAME=admin
-WAHA_DASHBOARD_PASSWORD=MyWA_123
+WAHA_DASHBOARD_PASSWORD=<WAHA_DASHBOARD_PASSWORD>
 
 # Dosya Yükleme & Medya
 UPLOAD_DIR=./public/uploads
