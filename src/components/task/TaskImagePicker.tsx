@@ -82,7 +82,7 @@ export default function TaskImagePicker({ onChange }: { onChange: (ids: string[]
         )}
       </div>
       <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={e => pick(e.target.files)} />
-      <p className="mt-1 text-[11px] text-[#667781]">En fazla {MAX_FILES} görsel, her biri 10 MB'a kadar. Bildirim görselle birlikte gönderilir.</p>
+      <p className="mt-1 text-[11px] text-[#667781]">En fazla {MAX_FILES} görsel, her biri en fazla 10 MB. Bildirim görselle birlikte gönderilir.</p>
       {message && <p className="mt-1 text-[11px] text-red-600">{message}</p>}
     </div>
   );
