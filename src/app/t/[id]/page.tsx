@@ -168,6 +168,21 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
             )}
           </div>
 
+          {/* Görseller */}
+          {task.attachments && task.attachments.length > 0 && (
+            <div className="pt-3 border-t border-[#e9edef]/60">
+              <span className="text-xs text-[#667781] block mb-1.5 font-medium">🖼️ Görseller</span>
+              <div className="grid grid-cols-2 gap-2">
+                {task.attachments.map((a: any) => (
+                  <a key={a.id} href={`/api/tasks/${id}/attachments/${a.id}`} target="_blank" rel="noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/tasks/${id}/attachments/${a.id}`} alt={a.fileName} className="w-full rounded-lg border border-[#e9edef] object-cover" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Görevliler */}
           {task.assignees && task.assignees.length > 0 && (
             <div className="pt-3 border-t border-[#e9edef]/60">

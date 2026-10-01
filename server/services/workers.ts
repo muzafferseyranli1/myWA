@@ -4,6 +4,7 @@ import { processInbox, processOutbox, runScheduler } from './delivery.service';
 import { wahaService } from './waha.service';
 import { contactResolver } from './contact-resolver.service';
 import { syncHistory } from './sync.service';
+import { attachmentService } from './attachment.service';
 let stopped = true;
 let started = false;
 const running = new Set<Promise<void>>();
@@ -42,6 +43,7 @@ export async function prepareTenant() {
   await prisma.$queryRaw`SELECT ack,preview FROM messages LIMIT 1`;
   await prisma.$queryRaw`SELECT session FROM sync_states LIMIT 1`;
   await prisma.$queryRaw`SELECT user_id FROM message_reads LIMIT 1`;
+  await prisma.$queryRaw`SELECT id FROM task_attachments LIMIT 1`;
   await contactResolver.ready;
 }
 export async function startWorkers() {
@@ -57,6 +59,7 @@ export async function startWorkers() {
   loop('inbox', 250, () => forEachTenant(async () => { for (let i = 0; i < 25 && await processInbox(); i++); }));
   loop('outbox', 1000, () => forEachTenant(processOutbox));
   loop('scheduler', 30000, () => forEachTenant(() => runScheduler()));
+  loop('attachments', 3600000, () => forEachTenant(() => attachmentService.cleanupOrphans()));
   loop('waha', 15000, () => forEachTenant(() => wahaService.reconcile()));
   loop('history', 3000, () => forEachTenant(syncHistory), 60000);
 }

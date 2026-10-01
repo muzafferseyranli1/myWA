@@ -8,6 +8,7 @@ import { contactResolver } from './contact-resolver.service';
 import { urlShortenerService } from './url-shortener.service';
 import { mediaService } from './media.service';
 import { currentTenant } from '../lib/tenant';
+import { attachmentService } from './attachment.service';
 import { getNotificationSettings } from '../lib/notification-settings';
 import { isWeekend, quietUntil } from '../lib/quiet-hours';
 import { classifySendError, eventKey, istanbulDay, parseMessage, reminderDue, retryDelay, isStatusOrBroadcast } from '../lib/reliability';
@@ -240,8 +241,21 @@ export function formatDateTR(date: Date): string {
   }).format(date);
 }
 
-export async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string; linkPreview?: boolean } | null> {
+type RenderedImage = { mimetype: string; filename: string; data: string };
+async function loadImage(id: unknown): Promise<RenderedImage | null> {
+  if (typeof id !== 'string') return null;
+  const row = await prisma.taskAttachment.findUnique({ where: { id } });
+  const bytes = row ? await attachmentService.read(id) : null;
+  return row && bytes ? { mimetype: row.mimeType, filename: row.fileName, data: bytes.toString('base64') } : null;
+}
+
+export async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string; linkPreview?: boolean; image?: RenderedImage } | null> {
   const payload = job.payload as any;
+  if (job.kind === 'TASK_IMAGE') {
+    // A picture whose file is gone has nothing left to send.
+    const image = await loadImage(payload.imageId);
+    return image ? { text: '', mentions: [], image } : null;
+  }
   if (job.kind === 'REMINDER') {
     if (payload.day && payload.day !== istanbulDay()) return null;
     const tasks = await prisma.task.findMany({
@@ -385,7 +399,9 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
       text = text.replace(payload.url, shortLink);
     }
   }
-  return { text, mentions: payload.mentions || [], replyTo: payload.replyTo || undefined, linkPreview: payload.linkPreview ?? false };
+  // The notice goes out as the photo's caption; without the file it still goes out as text.
+  const image = payload.imageId ? await loadImage(payload.imageId) : null;
+  return { text, mentions: payload.mentions || [], replyTo: payload.replyTo || undefined, linkPreview: payload.linkPreview ?? false, ...(image ? { image } : {}) };
 }
 
 export async function processOutbox() {
@@ -426,7 +442,9 @@ export async function processOutbox() {
         status = 'PENDING';
       } else {
       sending = true;
-      const response = await wahaService.sendMessage(job.chatId, rendered.text, rendered.mentions, rendered.replyTo, rendered.linkPreview ?? false);
+      const response = rendered.image
+        ? await wahaService.sendImage(job.chatId, rendered.image, rendered.text, rendered.mentions, rendered.replyTo)
+        : await wahaService.sendMessage(job.chatId, rendered.text, rendered.mentions, rendered.replyTo, rendered.linkPreview ?? false);
       providerId = typeof response?.id === 'string' ? response.id : undefined;
       }
     }

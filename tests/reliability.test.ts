@@ -274,3 +274,19 @@ test('quick due dates skip the weekend', async () => {
   assert.equal(firstWorkingDay(1, thu), '2026-10-02');
   assert.equal(firstWorkingDay(7, thu), '2026-10-08');
 });
+
+test('attachment images are recognised by content and split into caption + follow-ups', async () => {
+  const { detectImageType, planImages, MAX_CAPTION_LENGTH } = await import('../server/services/attachment.service');
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20)]);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);
+  const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.alloc(8)]);
+  assert.equal(detectImageType(jpeg)?.mime, 'image/jpeg');
+  assert.equal(detectImageType(png)?.mime, 'image/png');
+  assert.equal(detectImageType(webp)?.mime, 'image/webp');
+  assert.equal(detectImageType(Buffer.from('<svg onload=alert(1)></svg>')), null);
+  assert.equal(detectImageType(Buffer.from('GIF89a' + 'x'.repeat(20))), null);
+
+  assert.deepEqual(planImages(['a', 'b', 'c'], 200), { captioned: 'a', rest: ['b', 'c'] });
+  assert.deepEqual(planImages(['a', 'b'], MAX_CAPTION_LENGTH + 1), { captioned: undefined, rest: ['a', 'b'] });
+  assert.deepEqual(planImages([], 10), { captioned: undefined, rest: [] });
+});

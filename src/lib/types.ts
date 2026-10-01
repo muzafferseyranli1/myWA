@@ -69,7 +69,15 @@ export interface TaskItem {
   chat?: ChatItem;
   creator?: ContactItem | null;
   assignees: TaskAssigneeItem[];
+  attachments?: TaskAttachmentItem[];
   sourceMessage?: MessageItem | null;
+}
+
+export interface TaskAttachmentItem {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
 }
 
 export interface TaskAssigneeItem {
@@ -92,6 +100,7 @@ export interface CreateTaskRequest {
   priority?: TaskPriority;
   dueDate?: string;
   assigneeIds?: string[];
+  attachmentIds?: string[];
   notifyOnCreate?: boolean;
   notifyAssigneesDirectly?: boolean;
 }

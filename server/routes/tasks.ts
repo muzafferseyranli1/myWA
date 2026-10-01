@@ -1,4 +1,7 @@
 import { RequestHandler, Router } from 'express';
+import multer from 'multer';
+import { prisma } from '../lib/prisma';
+import { attachmentService, MAX_ATTACHMENT_BYTES } from '../services/attachment.service';
 import { taskService } from '../services/task.service';
 import { reminderService } from '../services/reminder.service';
 import { broadcastTaskCreated, broadcastTaskUpdated, broadcastTaskDeleted } from '../sockets';
@@ -25,6 +28,34 @@ const publicTask = (handler: RequestHandler): RequestHandler => async (req, res,
   if (!tenant) return res.status(404).json({ error: 'Görev bulunamadı' });
   return runWithTenant(tenant, () => handler(req, res, next));
 };
+
+const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ATTACHMENT_BYTES, files: 1, fields: 3 } }).single('file');
+
+// Images are uploaded first and attached to the task when it is created.
+router.post('/attachments', requireAuth, (req, res) => {
+  imageUpload(req, res, async error => {
+    if (error) return res.status(413).json({ error: 'Görsel yüklenemedi veya 10 MB sınırını aşıyor' });
+    if (!req.file) return res.status(400).json({ error: 'Görsel gerekli' });
+    try {
+      // Uploads that never became part of a task are capped so they cannot pile up.
+      const waiting = await prisma.taskAttachment.count({ where: { taskId: null, createdAt: { gt: new Date(Date.now() - 86_400_000) } } });
+      if (waiting >= 30) return res.status(429).json({ error: 'Çok fazla bekleyen görsel var; önce görevleri kaydedin' });
+      const row = await attachmentService.save(req.file.buffer, req.file.originalname);
+      res.json({ id: row.id, fileName: row.fileName, mimeType: row.mimeType, size: row.size });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+});
+
+router.delete('/attachments/:id', requireAuth, async (req, res) => {
+  try {
+    await attachmentService.discard(String(req.params.id));
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.get('/kanban', requireAuth, async (req, res) => {
   try {
@@ -115,6 +146,21 @@ router.get('/:id/public', publicTask(async (req, res) => {
       return res.status(404).json({ error: 'Görev bulunamadı' });
     }
     res.json(task);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}));
+
+// Opened from the task link by people who are not logged in, like the task page itself.
+router.get('/:id/attachments/:attId', publicTask(async (req, res) => {
+  try {
+    const row = await prisma.taskAttachment.findFirst({ where: { id: String(req.params.attId), taskId: String(req.params.id) } });
+    const bytes = row ? await attachmentService.read(row.id) : null;
+    if (!row || !bytes) return res.status(404).json({ error: 'Görsel bulunamadı' });
+    res.setHeader('Content-Type', row.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(bytes);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

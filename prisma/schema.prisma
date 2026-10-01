@@ -160,6 +160,7 @@ model Task {
   creator       User?         @relation("taskCreatorUser", fields: [createdBy], references: [id], onDelete: SetNull)
   assignees     TaskAssignee[]
   reminders     TaskReminder[]
+  attachments   TaskAttachment[]
 
   @@index([chatId, status])
   @@index([status])
@@ -297,4 +298,18 @@ model AppSetting {
   value     Json
   updatedAt DateTime @updatedAt @map("updated_at")
   @@map("app_settings")
+}
+
+model TaskAttachment {
+  id        String   @id @default(uuid())
+  taskId    String?  @map("task_id")
+  fileName  String   @map("file_name")
+  mimeType  String   @map("mime_type")
+  size      Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_attachments")
 }

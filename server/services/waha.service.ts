@@ -218,6 +218,33 @@ export class WAHAService {
       throw err;
     }
   }
+  /** Sends one image; the notice text (if any) is its caption. */
+  public async sendImage(
+    chatId: string,
+    file: { mimetype: string; filename: string; data: string },
+    caption?: string,
+    mentions?: string[],
+    replyTo?: string
+  ): Promise<any> {
+    const normalize = (id: string) => id.replace('@s.whatsapp.net', '@c.us');
+    const body: any = {
+      session: this.sessionName,
+      chatId: normalize(chatId),
+      file,
+      ...(caption ? { caption } : {}),
+      ...(mentions?.length ? { mentions: mentions.map(normalize) } : {}),
+    };
+    if (replyTo) body.reply_to = replyTo;
+    const post = async () => (await this.request(`${this.baseUrl}/api/sendImage`, { method: 'POST', body: JSON.stringify(body) }, 60000)).json();
+    try {
+      return await post();
+    } catch (err: any) {
+      if (!replyTo) throw err;
+      console.warn(`[WAHA] sendImage with reply_to=${replyTo} failed (${err?.message || err}). Retrying without reply_to...`);
+      delete body.reply_to;
+      return post();
+    }
+  }
   public async getHistory(offset: number, from: number, until: number) {
     const query = new URLSearchParams({ limit: '100', offset: String(offset), downloadMedia: 'false', 'filter.timestamp.gte': String(from), 'filter.timestamp.lte': String(until) });
     return (await this.request(`${this.baseUrl}/api/${encodeURIComponent(this.sessionName)}/chats/all/messages?${query}`, {}, 15000)).json();

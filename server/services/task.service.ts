@@ -4,8 +4,21 @@ import { prisma } from '../lib/prisma';
 import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
 import { enqueue, taskPayload, notificationView, pendingAssignees } from './delivery.service';
 import { contactResolver } from './contact-resolver.service';
+import { attachmentService, planImages } from './attachment.service';
 
-const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true };
+const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true, attachments: { orderBy: { createdAt: 'asc' as const } } };
+/**
+ * Queues a "new task" notice for one chat. The first picture carries the text as
+ * its caption; the others (or all of them, for a long text) follow as their own
+ * messages, one job each so a retry never repeats a picture.
+ */
+async function enqueueWithImages(tx: Prisma.TransactionClient, task: any, args: { operationKey: string; chatId: string; kind: string; payload: any }) {
+  const { captioned, rest } = planImages((task.attachments || []).map((a: any) => a.id), String(args.payload.text || '').length);
+  await enqueue(tx, { ...args, taskId: task.id, payload: { ...args.payload, ...(captioned ? { imageId: captioned } : {}) } });
+  for (const imageId of rest) {
+    await enqueue(tx, { operationKey: `TASK_IMAGE:${task.id}:${args.chatId}:${imageId}`, chatId: args.chatId, taskId: task.id, kind: 'TASK_IMAGE', payload: { imageId } });
+  }
+}
 async function attachNotification<T extends { id: string }>(task: T) {
   const job = await prisma.outgoingJob.findFirst({ where: { taskId: task.id }, orderBy: { sequence: 'desc' } });
   return { ...task, notification: job ? notificationView(job) : null };
@@ -25,13 +38,9 @@ async function queueTask(
   const operationKey = extra?.completedAssignee
     ? `TASK_PARTIAL:${task.id}:${extra.assigneeId}:${new Date().toISOString()}`
     : timestamp ? `${kind}:${task.id}:${timestamp}` : `${kind}:${task.id}`;
-  await enqueue(tx, {
-    operationKey,
-    chatId: task.chatId,
-    taskId: task.id,
-    kind,
-    payload: taskPayload(task, kind, extra)
-  });
+  const payload = taskPayload(task, kind, extra);
+  if (kind === 'TASK_CREATED') await enqueueWithImages(tx, task, { operationKey, chatId: task.chatId, kind, payload });
+  else await enqueue(tx, { operationKey, chatId: task.chatId, taskId: task.id, kind, payload });
 
   // If notifyAssigneesDirectly is true and this is a TASK_CREATED notification,
   // also send a personalized direct message (DM) to each assigned person.
@@ -40,10 +49,9 @@ async function queueTask(
       const dmChatId = contactResolver.resolveDirectChatId(a.contact);
       if (dmChatId && dmChatId !== task.chatId) {
         const dmOpKey = `TASK_CREATED_DM:${task.id}:${dmChatId}`;
-        await enqueue(tx, {
+        await enqueueWithImages(tx, task, {
           operationKey: dmOpKey,
           chatId: dmChatId,
-          taskId: task.id,
           kind: 'TASK_CREATED_DM',
           payload: taskPayload(task, 'TASK_CREATED_DM', {
             groupName: task.chat?.name || undefined,
@@ -65,7 +73,7 @@ function validate(data: any, creating = false) {
   if (data.clientRequestId !== undefined && (typeof data.clientRequestId !== 'string' || !data.clientRequestId || data.clientRequestId.length > 128)) throw new Error('Geçersiz işlem kimliği');
 }
 export const taskService = {
-  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; notifyAssigneesDirectly?: boolean; clientRequestId?: string }) {
+  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; notifyAssigneesDirectly?: boolean; clientRequestId?: string; attachmentIds?: string[] }) {
     validate(data, true);
     const requestKey = `${data.createdBy}:${data.clientRequestId || randomUUID()}`;
     const task = await prisma.$transaction(async tx => {
@@ -82,8 +90,10 @@ export const taskService = {
         notifyAssigneesDirectly: Boolean(data.notifyAssigneesDirectly),
         assignees: { create: [...new Set(data.assigneeIds || [])].map(contactId => ({ contactId })) },
       }, include });
-      if (created.notifyOnCreate) await queueTask(tx, created, 'TASK_CREATED');
-      return created;
+      if (data.attachmentIds?.length) await attachmentService.link(tx, created.id, data.attachmentIds);
+      const withFiles = data.attachmentIds?.length ? await tx.task.findUniqueOrThrow({ where: { id: created.id }, include }) : created;
+      if (withFiles.notifyOnCreate) await queueTask(tx, withFiles, 'TASK_CREATED');
+      return withFiles;
     });
     return attachNotification(task);
   },
@@ -180,10 +190,13 @@ export const taskService = {
     return attachNotification(task);
   },
   async deleteTask(id: string) {
-    return prisma.$transaction(async tx => {
+    const files = await prisma.taskAttachment.findMany({ where: { taskId: id }, select: { id: true } });
+    const deleted = await prisma.$transaction(async tx => {
       await tx.outgoingJob.updateMany({ where: { taskId: id, status: 'PENDING' }, data: { status: 'CANCELLED' } });
       return tx.task.delete({ where: { id } });
     });
+    await attachmentService.removeFiles(files.map(f => f.id));
+    return deleted;
   },
   async getTasksByChat(chatId: string) {
     return Promise.all((await prisma.task.findMany({ where: { chatId }, include, orderBy: { createdAt: 'desc' } })).map(attachNotification));

@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { X, Search, MessageSquareText } from 'lucide-react';
 import { newClientId } from '../../lib/client-id';
 import QuickDueDates from './QuickDueDates';
+import TaskImagePicker from './TaskImagePicker';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -45,6 +46,8 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
   const [notifyAssigneesDirectly, setNotifyAssigneesDirectly] = useState(true);
   const [searchContact, setSearchContact] = useState('');
   const [loading, setLoading] = useState(false);
+  const [imageIds, setImageIds] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   if (!isOpen) return null;
 
@@ -72,6 +75,7 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
           priority,
           dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
           assigneeIds,
+          attachmentIds: imageIds,
           notifyOnCreate,
           notifyAssigneesDirectly
         })
@@ -169,6 +173,8 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
               />
             </div>
 
+            <TaskImagePicker onChange={(ids, busy) => { setImageIds(ids); setUploading(busy); }} />
+
             <div>
               <label className="mb-1 block text-sm text-[#667781]">👥 Görevliler</label>
               <div className="relative mb-2">
@@ -222,8 +228,8 @@ export default function CreateTaskModal({ isOpen, onClose, chatId, sourceMessage
 
         <div className="flex justify-end space-x-2 p-4 border-t border-[#e9edef]">
           <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm text-[#667781] hover:bg-[#f0f2f5]">İptal</button>
-          <button form="create-task-form" type="submit" disabled={loading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f] disabled:opacity-50">
-            {loading ? 'Oluşturuluyor...' : 'Görev Oluştur 📌'}
+          <button form="create-task-form" type="submit" disabled={loading || uploading} className="rounded bg-[#00A884] px-4 py-2 text-sm font-medium text-[#ffffff] hover:bg-[#008f6f] disabled:opacity-50">
+            {loading ? 'Oluşturuluyor...' : uploading ? 'Görsel yükleniyor...' : 'Görev Oluştur 📌'}
           </button>
         </div>
       </div>
