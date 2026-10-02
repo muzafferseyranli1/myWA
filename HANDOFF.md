@@ -1,8 +1,8 @@
 # 🚀 MyWA Projesi Kapsamlı Devir Notu (Handoff Documentation)
 
-**Tarih:** 18 Eylül 2026  
+**Tarih:** 2 Ekim 2026 (ilk sürüm: 18 Eylül 2026)  
 **Durum:** Üretim Ortamında Canlıda (Coolify VPS `188.132.198.144`) & Tüm Testler Geçti  
-**Son Commit:** `5a118dd` (veya güncel `main`)  
+**Son Commit:** `dd9841e` (veya güncel `main`)  
 **Git Deposu:** `https://github.com/muzafferseyranli1/myWA`
 
 ---
@@ -142,7 +142,68 @@ Bu oturumda çözülen sorunların teknik detayları (yeni geliştirici / ajan i
 
 ---
 
-## 📋 6. Sıradaki İşler ve Önerilen Yol Haritası
+## 🆕 6. Son Oturumda Eklenenler (1–2 Ekim 2026)
+
+Hepsi `main` dalında, canlıda denendi ve kullanıcı bir sorun görmedi (görsel eklemede PNG/WebP'nin WhatsApp'ta doğru gittiği ayrıca gözle doğrulanmalı).
+
+### 6.1 Kişi bazlı görev kapatma
+- `TaskAssignee` artık `completedAt`, `completedBy`, `completionNote` tutar. Görev, **tüm görevliler kendi payını kapatınca** `DONE` olur (`taskService.closeTask(id, { completionNote, completedBy, assigneeId })`).
+- Biri kapatınca gruba "X görevini tamamladı / Henüz tamamlamayanlar: …" bildirimi gider; son kişi kapatınca eski "Görev Tamamlandı!" mesajı gider.
+- Günlük/manuel özetler ve DM hatırlatmaları yalnızca **henüz kapatmamış** görevlileri listeler.
+- DM'deki görev linkine `?a=<assigneeId>` eklenir; `/t/:id` sayfası o kişiyi önceden seçer. Grup linkinde kişi listeden seçilir.
+- Yönetici panelinden durumu DONE yapmak herkesi tamamlanmış sayar; yeniden aktifleştirme hepsini sıfırlar.
+- "Görevlilere özel mesaj (DM)" kutusu varsayılan **işaretli** (web + mobil kaynak).
+- **Bilinen boşluk:** Görev düzenlenirken kalan son bekleyen görevli çıkarılırsa görev otomatik DONE olmaz.
+
+### 6.2 Yasaklı saat (parametrik) ve günlük özet zamanı
+- Ayarlar admin panelindeki **"Bildirim saatleri"** kartından değişir (varsayılan: yasaklı başlangıç 22:00, hafta içi gün başlangıcı 09:00, hafta sonu 11:00, açma/kapama kutusu). Ortak ayar: `app_settings` tablosu, anahtar `notifications`; API `GET/PUT /api/admin/settings`.
+- Mantık `server/lib/quiet-hours.ts` (saf fonksiyonlar, testli), okuma/yazma `server/lib/notification-settings.ts` (15 sn önbellek). Saat dilimi sabit İstanbul (UTC+3).
+- Yasaklı saatte oluşan **her bildirim** `enqueue()` içinde `next_attempt_at` ile gün başlangıcına ertelenir. Günlük özet zamanı da gün başlangıcıdır (hafta içi 09:00, hafta sonu 11:00; her gün gider).
+- Testlerde gerçek saate takılmamak için `QUIET_HOURS=off` ortam değişkeni kullanılır (`tests/integration.test.ts` başında ayarlı).
+
+### 6.3 Günaydın ve kapanış mesajları
+- Yalnızca **zamanlanmış** günlük özetlerde: önce `GREETING` (DM: `@isim Günaydın ☀️`, grup: `@all Günaydın ☀️`), özetten sonra `CLOSING` (hafta içi "Kolay gelsin 🤝", hafta sonu "İyi hafta sonları 🌳"). Manuel özetlerde yok.
+- Grup `@all`, WAHA `mentions: ["all"]` ile gönderilir; WAHA reddederse mentions'sız yeniden denenir (`waha.service.ts`).
+
+### 6.4 Hızlı bitiş tarihi
+- `src/lib/due-date.ts` + `QuickDueDates.tsx`: Bugün, Yarın, 3 gün, 5 gün, 1 hafta, 15 gün; hafta sonuna düşen tarih Pazartesi'ye kayar. Hem "Yeni Görev" hem "Görev Düzenle" penceresinde. Takvimden elle seçilen tarih olduğu gibi kalır. Mobil uygulamada yok. Tarih alanının beyaz-üstü-beyaz sorunu giderildi.
+
+### 6.5 Göreve görsel ekleme
+- Yeni görev penceresinde `TaskImagePicker`: en fazla 5 görsel, JPEG/PNG/WebP, her biri en fazla 10 MB; seçilir seçilmez `POST /api/tasks/attachments` ile yüklenir, görev oluşturulurken `attachmentIds` ile bağlanır.
+- Depolama: `MEDIA_DIR/task-attachments/<tenant>/<id>` (kalıcı `mywa_media` volume'ü içinde). İçerik, ilk baytlarla (magic bytes) doğrulanır. Görev silinince dosyalar silinir; bağlanmamış yüklemeler 1 gün sonra temizlenir (saatlik worker).
+- Gönderim: bildirim metni ilk görselin **altyazısı** olur (900 karakteri aşarsa metin ayrı, görseller ayrı); kalan görseller `TASK_IMAGE` işleri olarak art arda gider (iş başına tek WhatsApp mesajı, tekrar denemede çift gönderim olmaz). DM açıksa DM'e de aynı şekilde. `wahaService.sendImage` kullanılır.
+- `/t/:id` sayfasında görseller görünür (`GET /api/tasks/:id/attachments/:attId`, görev linki gibi girişsiz).
+- **Çözülen hata:** multer yükleme bitince istek bağlamını kaybediyordu ("Tenant context missing"); tenant baştan yakalanıp callback'te yeniden kuruluyor (`server/routes/tasks.ts`). Benzer akışlarda (stream olayı sonrası DB erişimi) aynı tuzağa dikkat.
+- **Eksikler:** mobil uygulamada görsel ekleme yok; düzenleme penceresinde sonradan görsel eklenemiyor; WAHA belgeleri JPEG öneriyor, PNG/WebP olduğu gibi gönderiliyor (sorun çıkarsa sunucuda JPEG'e çevirmek gerekir).
+
+### 6.6 Yeni migration'lar
+`20261001000000_per_assignee_completion`, `20261001010000_app_settings`, `20261002000000_task_attachments`. Konteyner açılırken `scripts/entrypoint.sh` → `migrate-safe.mjs` otomatik uygular; **hata olursa sessizce geçer**, bu yüzden her deploy sonrası Coolify Runtime Logs'ta `migrate` aratıp bakın.
+
+---
+
+## 🚢 7. Deploy Süreci ve Altyapı Notları
+
+- Uygulama Coolify'da **`mywa-web`** (UUID `tiadrkjgtdj1tet3ojuxegq4`), WAHA **`mywa-waha`** (UUID `mxnoyxmqujo9wk4t2tw46wnn`). Yanlış uygulamayı deploy etmeyin (WAHA'yı yeniden kurmak oturumu koparabilir).
+- Deploy: Coolify'da `mywa-web` → **Deploy**, ya da `COOLIFY_TOKEN` ve `COOLIFY_APP_UUID` ortam değişkenlerini ayarlayıp `node scripts/deploy-coolify.mjs`. Scriptler artık token'ı **ortamdan** okur; token'ı dosyaya veya sohbete yazmayın.
+- Coolify'da "Auto deploy: Deploy on push" açık ama depo public bağlı olduğu için GitHub'a **webhook elle eklenmedi**: push kendiliğinden deploy başlatmıyor. Kurmak için `mywa-web` → Webhooks → Manual Git Webhooks adresini/secret'ı GitHub `Settings → Webhooks`'a ekleyin (push olayı, `application/json`).
+- **Push öncesi mutlaka** `NODE_ENV=production npx next build` çalıştırın: `next build` lint hataları (örn. `react/no-unescaped-entities`) deploy'u düşürür. `<img>` uyarıları zararsızdır.
+- Dosyalar CRLF; Windows'ta `sed`/betikle düzenlerken satır sonlarını koruyun (Git "LF will be replaced by CRLF" uyarısı normaldir).
+- **Sunucu kaynakları:** Aynı VPS'te MyWA, YRNkasa ve rms3 çalışıyor. 1–2 Ekim'de deploy'lar sessizce düştü (`npm install` exit 255), GitHub'a bağlanılamadı ve Coolify "Redis MISCONF … unable to persist to disk" ile 500 verdi: **disk/bellek tükenmesi** belirtisi. Kontrol: `df -h /`, `free -h`, `docker system df`. Güvenli temizlik: `docker builder prune -af`, `docker image prune -f`. **Asla** `docker system prune -a` veya `--volumes` (WhatsApp oturumu, medya ve veritabanı volume'leri silinir).
+
+---
+
+## 🔐 8. Güvenlik Borçları (öncelikli)
+
+1. Eski sürümlerde düz metin olarak commit edilen değerler **git geçmişinde duruyor**; döndürülmeli: Coolify API token'ı, PostgreSQL şifresi, `WAHA_API_KEY`/webhook secret, `JWT_SECRET`, admin şifresi (`admin123`), WAHA dashboard şifresi. Bu dosyadaki ve scriptlerdeki değerler yer tutucuyla değiştirildi.
+2. Bir SSH özel anahtarı (yorumu `coolify`) ve bir Coolify token'ı sohbette paylaşıldı: panelden iptal edin/yenileyin.
+3. `server/index.ts` içinde `WAHA_API_KEY` için koda gömülü yedek değer var (crash loop önlemi); anahtarı yenilerken bunu da değiştirin.
+4. `docker-compose.yml` ve `.env.example` içinde WAHA dashboard şifresi için zayıf varsayılan var.
+5. Dockerfile'daki `ARG` ile gizli değerler (Coolify build argümanları) derleme loglarında düz metin görünüyor.
+6. `X:\RMSv3\scripts\deploy-live.mjs` ve dokümanlarında eski Coolify token'ı ile veritabanı şifresi gömülü (aynı sunucu).
+
+---
+
+## 📋 9. Sıradaki İşler ve Önerilen Yol Haritası
 
 Projeyi devralacak kişinin / ajanın önündeki görevler:
 
@@ -161,3 +222,6 @@ Projeyi devralacak kişinin / ajanın önündeki görevler:
 
 4. **Mobil Uygulama (Expo):**
    - `mobile/` klasöründeki React Native uygulamasını canlı API (`http://188.132.198.144:3060`) ile test edin.
+
+5. **Yeni iş adayları:** GitHub webhook ile otomatik deploy; mobil uygulamada görsel ekleme ve hızlı tarih butonları; düzenleme penceresine görsel ekleme; PNG/WebP için JPEG dönüştürme (gerekirse); migration hatalarını sessiz geçmek yerine görünür kılmak; düzenlemede son bekleyen görevli çıkarılınca görevi otomatik kapatmak.
+6. **Uzak dal:** `origin/feat/multi-user-mobile-web` var ancak yerele alınmadı; `main`'e zaten çok kullanıcılı/tenant çalışması girdi, ihtiyaç varsa karşılaştırın.
