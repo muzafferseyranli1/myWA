@@ -1,9 +1,9 @@
 # 🚀 MyWA Projesi Kapsamlı Devir Notu (Handoff Documentation)
 
-**Tarih:** 2 Ekim 2026 (ilk sürüm: 18 Eylül 2026)  
-**Durum:** Üretim Ortamında Canlıda (Coolify VPS `188.132.198.144`) & Tüm Testler Geçti  
-**Son Commit:** `dd9841e` (veya güncel `main`)  
-**Git Deposu:** `https://github.com/muzafferseyranli1/myWA`
+**Tarih:** 2 Ekim 2026 (Sabah Oturumu Güncellemesi)  
+**Durum:** Domain & DNS Kurulumu Yapıldı (`derinsoft.com.tr`), VPS Disk Temizliği ve Yeniden Başlatma Aşamasında  
+**Canlı IP:** `188.132.198.144`  
+**Git Deposu:** `https://github.com/muzafferseyranli1/myWA` (branch: `main`)
 
 ---
 
@@ -225,3 +225,74 @@ Projeyi devralacak kişinin / ajanın önündeki görevler:
 
 5. **Yeni iş adayları:** GitHub webhook ile otomatik deploy; mobil uygulamada görsel ekleme ve hızlı tarih butonları; düzenleme penceresine görsel ekleme; PNG/WebP için JPEG dönüştürme (gerekirse); migration hatalarını sessiz geçmek yerine görünür kılmak; düzenlemede son bekleyen görevli çıkarılınca görevi otomatik kapatmak.
 6. **Uzak dal:** `origin/feat/multi-user-mobile-web` var ancak yerele alınmadı; `main`'e zaten çok kullanıcılı/tenant çalışması girdi, ihtiyaç varsa karşılaştırın.
+
+---
+
+## 🌐 10. Son Oturum Özeti (Domain & VPS Canlandırma Devir Rehberi - 2 Ekim 2026)
+
+Bu oturumda VPS (`188.132.198.144`) üzerindeki tüm projeler için merkezi bir domain yapısı kuruldu ve deploy süreci test edildi.
+
+### 10.1 Domain ve DNS Yapılandırması
+* **Kayıt Kuruluşu:** Hosting Dünyam
+* **Domain:** `derinsoft.com.tr` (TRABIS)
+* **Nameserver'lar:** `dns1.hostingdunyam.net`, `dns2.hostingdunyam.net`
+* **Tanımlanan A Kayıtları (Tümü `188.132.198.144` IP'sine):**
+  - `@` (Root) -> `188.132.198.144`
+  - `mywa` -> `188.132.198.144` (`https://mywa.derinsoft.com.tr` - MyWA Web Port 3060)
+  - `panel` -> `188.132.198.144` (`https://panel.derinsoft.com.tr` - Coolify Dashboard Port 8000)
+  - `rms` -> `188.132.198.144` (`https://rms.derinsoft.com.tr` - Suitable RMS Port 3000 - **ÇALIŞIYOR 200 OK**)
+  - `kasa` -> `188.132.198.144` (`https://kasa.derinsoft.com.tr` - YRNkasa)
+  - `*` (Wildcard) -> `188.132.198.144` (Gelecek tüm projeler için)
+
+### 10.2 Mevcut Canlı Durum
+* **DNS Yayılımı:** Tamamlandı! Global DNS ve Google/Cloudflare sunucuları domaini `188.132.198.144` olarak çözümlüyor.
+* **RMS3 (`https://rms.derinsoft.com.tr/dashboard`):** Aktif, Traefik üzerinden HTTP 200 ile erişilebiliyor.
+* **Coolify Panel (`https://panel.derinsoft.com.tr`):** FQDN ayarlandı.
+* **MyWA (`https://mywa.derinsoft.com.tr`):** Domain Traefik'e yönleniyor; ancak aşağıdaki disk sorunu nedeniyle backend container'ı 503 veriyor.
+
+### 10.3 Karşılaşılan Sorun: VPS Disk Doluluğu & Redis Kilitlenmesi
+* **Sebep:** VPS diski (40 GB), birikmiş Docker imajları, Buildx derleme önbellekleri ve loglar yüzünden %100 doldu.
+* **Belirtiler:**
+  1. Coolify Redis hatası: `MISCCONF Redis is configured to save RDB snapshots, but it is currently unable to persist to disk...`
+  2. Coolify API ve dashboard'da HTTP 500 hatası.
+  3. Yeni build ve deploy'ların disk yokluğundan `restarting:unknown` durumuna düşmesi ve Traefik'in `503 Service Unavailable` dönmesi.
+
+### 10.4 Başka Makinadan Devam Ederken Yapılacak İlk Adımlar (Recovery Planı)
+
+Projeyi başka bilgisayardan açıp sunucuyu ayağa kaldırmak için sırasıyla şunları yapın:
+
+1. **Sunucuya SSH ile veya Hosting Dünyam Web Konsolundan Giriş Yapın:**
+   ```bash
+   ssh root@188.132.198.144
+   ```
+   *(Web konsoldan giriyorsanız siyah ekrana fareyle tıklayıp odaklanın, `root` ve şifrenizi girin).*
+
+2. **Diskte Acil Yer Açın (15-20 GB temizler):**
+   ```bash
+   # Build önbelleklerini ve eski imajları temizle (DİKKAT: Veritabanı/WAHA volume'lerini silmez)
+   docker builder prune -af
+   docker image prune -af
+   ```
+
+3. **Redis Yazma Kilidini Açın:**
+   ```bash
+   docker exec coolify-redis redis-cli config set stop-writes-on-bgsave-error no
+   ```
+
+4. **Coolify ve Proxy Servislerini Yeniden Başlatın:**
+   ```bash
+   docker restart coolify coolify-redis coolify-proxy
+   ```
+
+5. **MyWA'yı Yeniden Deploy Edin:**
+   - Coolify arayüzünden (`https://panel.derinsoft.com.tr` veya `http://188.132.198.144:8000`) MyWA projesine girip **Actions > Redeploy** yapın.
+   - Veya yerel terminalinizden:
+     ```bash
+     $env:COOLIFY_TOKEN='<GUNCEL_COOLIFY_TOKEN>'
+     $env:COOLIFY_APP_UUID='tiadrkjgtdj1tet3ojuxegq4'
+     node scripts/deploy-coolify.mjs
+     ```
+
+6. **Kalıcı Çözüm (Öneri):**
+   - Hosting Dünyam panelinden VPS diskini 40 GB'tan **60 GB veya 80 GB'a** yükseltmek uzun vadede tüm Docker build'leri için kalıcı rahatlık sağlayacaktır.
+
