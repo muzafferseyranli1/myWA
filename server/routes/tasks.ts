@@ -6,7 +6,7 @@ import { taskService } from '../services/task.service';
 import { reminderService } from '../services/reminder.service';
 import { broadcastTaskCreated, broadcastTaskUpdated, broadcastTaskDeleted } from '../sockets';
 import { requireAuth } from '../middleware/auth';
-import { listTenants, runWithTenant, Tenant } from '../lib/tenant';
+import { listTenants, maybeTenant, runWithTenant, Tenant } from '../lib/tenant';
 
 const router = Router();
 
@@ -33,18 +33,24 @@ const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize
 
 // Images are uploaded first and attached to the task when it is created.
 router.post('/attachments', requireAuth, (req, res) => {
-  imageUpload(req, res, async error => {
+  // multer finishes from stream events, outside the request's tenant context: carry it over.
+  const tenant = maybeTenant();
+  imageUpload(req, res, error => {
     if (error) return res.status(413).json({ error: 'Görsel yüklenemedi veya 10 MB sınırını aşıyor' });
-    if (!req.file) return res.status(400).json({ error: 'Görsel gerekli' });
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Görsel gerekli' });
+    if (!tenant) return res.status(500).json({ error: 'Oturum bağlamı bulunamadı' });
+    void runWithTenant(tenant, async () => {
     try {
       // Uploads that never became part of a task are capped so they cannot pile up.
       const waiting = await prisma.taskAttachment.count({ where: { taskId: null, createdAt: { gt: new Date(Date.now() - 86_400_000) } } });
       if (waiting >= 30) return res.status(429).json({ error: 'Çok fazla bekleyen görsel var; önce görevleri kaydedin' });
-      const row = await attachmentService.save(req.file.buffer, req.file.originalname);
+      const row = await attachmentService.save(file.buffer, file.originalname);
       res.json({ id: row.id, fileName: row.fileName, mimeType: row.mimeType, size: row.size });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
+    });
   });
 });
 
