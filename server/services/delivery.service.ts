@@ -5,6 +5,7 @@ import { events } from '../lib/events';
 import { wahaService } from './waha.service';
 import { messageService } from './message.service';
 import { contactResolver } from './contact-resolver.service';
+import { urlShortenerService } from './url-shortener.service';
 import { mediaService } from './media.service';
 import { currentTenant } from '../lib/tenant';
 import { attachmentService } from './attachment.service';
@@ -304,9 +305,10 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
         const assigneeStr = tags ? ` — ${tags}` : '';
         const timeBadge = timeFormatter(task);
         const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
-        const taskLink = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+        const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`;
+        const shortLink = await urlShortenerService.shortenUrl(rawUrl);
 
-        return `${idx + 1}. ${icon} *${cleanTitle}*${assigneeStr} ${timeBadge}\n   🔗 ${taskLink}`;
+        return `${idx + 1}. ${icon} *${cleanTitle}*${assigneeStr} ${timeBadge}\n   🔗 ${shortLink}`;
       }));
       sections.push(`${title} (${taskList.length}):\n${lines.join('\n')}`);
     };
@@ -358,7 +360,8 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
       const groupName = task.chat?.name ? ` (${task.chat.name})` : '';
       const cleanTitle = contactResolver.formatMentionsToNamesSync(task.title || '');
       const mine = task.assignees.find(a => a.contactId === payload.contactId);
-      const taskLink = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}${mine ? `?a=${mine.id}` : ''}`;
+      const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}${mine ? `?a=${mine.id}` : ''}`;
+      const shortLink = await urlShortenerService.shortenUrl(rawUrl);
 
       let timeBadge = '';
       if (task.dueDate) {
@@ -376,7 +379,7 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
 
       const dateStr = task.dueDate ? formatDateTR(new Date(task.dueDate)) : 'Belirtilmedi';
 
-      return `${idx + 1}. 📋 *${cleanTitle}*${groupName}\n   🗓️ Bitiş: ${dateStr} | ${timeBadge}\n   🔗 Kapat: ${taskLink}`;
+      return `${idx + 1}. 📋 *${cleanTitle}*${groupName}\n   🗓️ Bitiş: ${dateStr} | ${timeBadge}\n   🔗 Kapat: ${shortLink}`;
     }));
 
     const text = `⚠️ Sayın *${recipient}*\n\n${headingNotice}\n\n${textList.join('\n\n')}\n\nLütfen en kısa sürede tamamlayın veya durum güncellemesi yapın.`;
@@ -389,7 +392,13 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
   }
 
   if ((job.kind === 'GREETING' || job.kind === 'CLOSING') && payload.day && payload.day !== istanbulDay()) return null;
-  const text = payload.text || '';
+  let text = payload.text || '';
+  if (payload.url) {
+    const shortLink = await urlShortenerService.shortenUrl(payload.url);
+    if (shortLink && shortLink !== payload.url) {
+      text = text.replace(payload.url, shortLink);
+    }
+  }
   // The notice goes out as the photo's caption; without the file it still goes out as text.
   const image = payload.imageId ? await loadImage(payload.imageId) : null;
   return { text, mentions: payload.mentions || [], replyTo: payload.replyTo || undefined, linkPreview: payload.linkPreview ?? false, ...(image ? { image } : {}) };
