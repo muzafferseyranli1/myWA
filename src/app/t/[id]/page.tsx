@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useEffect, use, useCallback } from 'react';
-import { CheckCircle2, Clock, AlertTriangle, User, MessageSquare, ArrowLeft, Send, Check } from 'lucide-react';
+import { CheckCircle2, Clock, AlertTriangle, User, MessageSquare, ArrowLeft, Send, Check, RefreshCw } from 'lucide-react';
+import { COMMIT_CHOICES, istanbulWorkingDay } from '@/lib/due-date';
 
+// Due dates are stored as UTC midnight of the chosen day.
+const longDate = (d: string | Date) => new Date(d).toLocaleDateString('tr-TR', { timeZone: 'UTC', day: 'numeric', month: 'long', weekday: 'long' });
 const nameOf = (a: any) => a.contact?.displayName || a.contact?.pushName || a.contact?.phoneNumber || a.contactId?.split('@')[0] || '';
 
 export default function PublicTaskClosePage({ params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +20,9 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
   const [completionNote, setCompletionNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [mode, setMode] = useState<'progress' | 'close'>('progress');
+  const [days, setDays] = useState<number | null>(null);
+  const [committed, setCommitted] = useState(false);
 
   const fetchTask = useCallback(async () => {
     try {
@@ -83,6 +89,27 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
     }
   };
 
+  const handleCommit = async () => {
+    if (!assigneeId || days === null) return;
+    try {
+      setSubmitting(true);
+      const res = await fetch(`/api/tasks/${id}/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assigneeId, days })
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || 'Kaydedilemedi');
+      setTask(resData.task);
+      setCommitted(true);
+      setDays(null);
+    } catch (err: any) {
+      alert(err.message || 'İşlem başarısız');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#ffffff] flex items-center justify-center p-4">
@@ -110,6 +137,9 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
   const assignees: any[] = task.assignees || [];
   const hasAssignees = assignees.length > 0;
   const pendingAssignees = assignees.filter(a => !a.completedAt);
+  const me = assignees.find(a => a.id === assigneeId);
+  // Without assignees there is nobody to promise a date; only closing is offered.
+  const activeMode = hasAssignees ? mode : 'close';
   const priorityLabels: Record<string, { label: string; color: string }> = {
     LOW: { label: 'Düşük', color: 'text-green-400 bg-green-400/10 border-green-400/20' },
     MEDIUM: { label: 'Orta', color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20' },
@@ -128,8 +158,8 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
             <span className="text-xl font-bold tracking-tight text-[#00A884]">MyWA</span>
             <span className="text-xs text-[#667781] font-medium px-2 py-0.5 rounded bg-[#f0f2f5]">Görev Portalı</span>
           </div>
-          <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${isDone ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'}`}>
-            {isDone ? '✅ Tamamlandı' : '🟡 Devam Ediyor'}
+          <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${isDone ? 'bg-green-500/10 text-green-600 border-green-500/20' : task.status === 'IN_PROGRESS' ? 'bg-blue-500/10 text-blue-600 border-blue-500/20' : 'bg-yellow-500/10 text-yellow-700 border-yellow-500/20'}`}>
+            {isDone ? '✅ Tamamlandı' : task.status === 'IN_PROGRESS' ? '🔄 Devam Ediyor' : '🟡 Bekliyor'}
           </span>
         </div>
 
@@ -191,9 +221,9 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
                 {task.assignees.map((a: any) => {
                   const name = nameOf(a);
                   return (
-                    <span key={a.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#ffffff] border border-[#e9edef] text-xs text-[#D1D7DB]">
-                      {a.completedAt ? <Check className="h-3 w-3 text-[#00A884]" /> : <User className="h-3 w-3 text-[#00A884]" />}
-                      {name}{a.completedAt ? ' · tamamladı' : ' · bekliyor'}
+                    <span key={a.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#ffffff] border border-[#e9edef] text-xs text-[#54656f]">
+                      {a.completedAt ? <Check className="h-3 w-3 text-[#00A884]" /> : a.committedAt ? <RefreshCw className="h-3 w-3 text-blue-600" /> : <User className="h-3 w-3 text-[#00A884]" />}
+                      {name}{a.completedAt ? ' · tamamladı' : a.committedDueDate ? ` · devam ediyor · ${longDate(a.committedDueDate)} tarihine kadar` : ' · bekliyor'}
                     </span>
                   );
                 })}
@@ -253,21 +283,11 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
             )}
           </div>
         ) : (
-          <form onSubmit={handleCloseTask} className="rounded-xl bg-[#f0f2f5] border border-[#e9edef] p-5 space-y-4 shadow-lg">
-            <div className="border-b border-[#e9edef] pb-2">
-              <h2 className="text-sm font-bold text-[#111b21] flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4 text-[#00A884]" />
-                Görevi Kapat
-              </h2>
-              <p className="text-xs text-[#667781] mt-0.5">
-                Görevi tamamladıysanız bitirme notunuzu yazarak kapatın.
-              </p>
-            </div>
-
+          <div className="rounded-xl bg-[#f0f2f5] border border-[#e9edef] p-5 space-y-4 shadow-lg">
             {hasAssignees ? (
               <div>
                 <label className="block text-xs text-[#667781] mb-1 font-medium">
-                  Kim olarak kapatıyorsunuz?
+                  Kim olarak işlem yapıyorsunuz?
                 </label>
                 <select
                   value={assigneeId}
@@ -297,6 +317,60 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
               </div>
             )}
 
+
+            {hasAssignees && (
+              <div className="grid grid-cols-2 gap-2" role="tablist">
+                <button type="button" role="tab" aria-selected={activeMode === 'progress'} onClick={() => setMode('progress')}
+                  className={'flex items-center justify-center gap-1.5 rounded-lg border py-2.5 text-sm font-semibold ' + (activeMode === 'progress' ? 'border-blue-600 bg-blue-600 text-white' : 'border-[#d1d7db] bg-white text-[#54656f]')}>
+                  <RefreshCw className="h-4 w-4" /> Devam ediyorum
+                </button>
+                <button type="button" role="tab" aria-selected={activeMode === 'close'} onClick={() => setMode('close')}
+                  className={'flex items-center justify-center gap-1.5 rounded-lg border py-2.5 text-sm font-semibold ' + (activeMode === 'close' ? 'border-[#00A884] bg-[#00A884] text-white' : 'border-[#d1d7db] bg-white text-[#54656f]')}>
+                  <CheckCircle2 className="h-4 w-4" /> Görevi kapat
+                </button>
+              </div>
+            )}
+
+            {activeMode === 'progress' ? (
+              <div className="space-y-3">
+                {committed && me?.committedAt && (
+                  <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-center text-sm font-medium text-blue-700">
+                    Kaydedildi, WhatsApp grubuna bildirildi.
+                  </div>
+                )}
+                {!me ? (
+                  <p className="text-xs text-[#667781]">Önce kendi adınızı seçin.</p>
+                ) : me.committedAt ? (
+                  <div className="rounded-lg bg-white p-3 text-sm text-[#111b21] border border-[#e9edef]">
+                    Görevi <b>{longDate(me.committedDueDate)}</b> tarihine kadar tamamlayacağınızı bildirdiniz.
+                    <p className="mt-1 text-xs text-[#667781]">Tarih yalnızca bir kez verilebilir. Bitirdiğinizde &quot;Görevi kapat&quot; sekmesinden kapatın.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <span className="block text-xs text-[#667781] mb-1.5 font-medium">Ne zamana kadar tamamlayacaksınız?</span>
+                      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                        {COMMIT_CHOICES.map(c => (
+                          <button key={c.days} type="button" onClick={() => setDays(c.days)} aria-pressed={days === c.days} aria-label={`${c.label}: ${longDate(istanbulWorkingDay(c.days))}`}
+                            className={'flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ' + (days === c.days ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-[#d1d7db] bg-white text-[#111b21]')}>
+                            <span className="font-semibold">{c.label}</span>
+                            <span className="text-xs text-[#667781]">{longDate(istanbulWorkingDay(c.days))}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-[#ffffff]/60 p-2.5 text-[11px] text-[#667781] border border-[#e9edef]/40">
+                      ℹ️ Seçtiğiniz tarih görevin bitiş tarihi olur ve WhatsApp grubuna bildirilir. Tarih <b>yalnızca bir kez</b> verilebilir; hafta sonuna denk gelen tarih Pazartesi&apos;ye kayar.
+                    </div>
+                    <button type="button" onClick={() => void handleCommit()} disabled={submitting || days === null}
+                      className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 text-sm flex items-center justify-center gap-2 shadow-md">
+                      <RefreshCw className="h-4 w-4" /> {submitting ? 'Kaydediliyor…' : 'Devam ediyorum'}
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+          <form onSubmit={handleCloseTask} className="space-y-4">
             <div>
               <label className="block text-xs text-[#667781] mb-1 font-medium">
                 Görev Bitirme Notu <span className="text-red-400">* (Zorunlu)</span>
@@ -333,6 +407,8 @@ export default function PublicTaskClosePage({ params }: { params: Promise<{ id: 
               )}
             </button>
           </form>
+            )}
+          </div>
         )}
 
         {/* Footer */}

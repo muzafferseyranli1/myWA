@@ -88,6 +88,9 @@ export interface TaskAssigneeItem {
   completedAt?: string | null;
   completedBy?: string | null;
   completionNote?: string | null;
+  /** Date the assignee promised from the task link (set once). */
+  committedDueDate?: string | null;
+  committedAt?: string | null;
 }
 
 export interface CreateTaskRequest {

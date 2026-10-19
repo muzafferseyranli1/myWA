@@ -273,6 +273,10 @@ model TaskAssignee {
   completedAt    DateTime? @map("completed_at")
   completedBy    String?   @map("completed_by")
   completionNote String?   @map("completion_note")
+  // The date this assignee promised from the task link. They may set it once;
+  // the task creator can still change dates from the panel.
+  committedDueDate DateTime? @map("committed_due_date")
+  committedAt      DateTime? @map("committed_at")
 
   task    Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)

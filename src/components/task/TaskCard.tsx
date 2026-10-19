@@ -3,6 +3,7 @@
 import { deliveryLabels } from '../../lib/types';
 import { cn } from '../../lib/utils';
 import ReminderButton from './ReminderButton';
+import { openCommitments } from '../../lib/due-date';
 
 export default function TaskCard({ task, onEdit, onRemind }: { task: any, onEdit: () => void, onRemind: () => void }) {
   const getStatusColor = (status: string) => {
@@ -31,6 +32,7 @@ export default function TaskCard({ task, onEdit, onRemind }: { task: any, onEdit
       )}
 
       {task.notification && <p className="text-xs text-[#667781] mt-2">{deliveryLabels[task.notification.status as keyof typeof deliveryLabels]}</p>}
+      {openCommitments(task).length > 0 && <p className="mt-1 text-[11px] text-blue-700" title="Görevlilerin verdiği tamamlama tarihleri">🔄 {openCommitments(task).join(', ')}</p>}
       <div className="mt-3 flex items-center justify-between text-xs">
         <div className="flex items-center space-x-2">
           <span className="rounded bg-[#e9edef] px-2 py-0.5 text-[#667781]">{task.priority}</span>

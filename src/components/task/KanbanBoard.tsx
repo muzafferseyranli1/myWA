@@ -7,6 +7,7 @@ import { moveTaskById } from '../../lib/client-state';
 import { deliveryLabels } from '../../lib/types';
 import EditTaskModal from './EditTaskModal';
 import ReminderButton from './ReminderButton';
+import { openCommitments } from '../../lib/due-date';
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 
 const initialColumns = {
@@ -243,6 +244,7 @@ export default function KanbanBoard() {
                                     📝 {task.completionNote}
                                   </div>
                                 )}
+                                {openCommitments(task).length > 0 && <p className="text-[11px] text-blue-700" title="Görevlilerin verdiği tamamlama tarihleri">🔄 {openCommitments(task).join(', ')}</p>}
                                 {task.assignees && task.assignees.length > 0 && (
                                   <div className="flex -space-x-1 mt-1">
                                     {task.assignees.map((a: any) => {

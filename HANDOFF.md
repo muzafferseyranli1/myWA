@@ -176,8 +176,17 @@ Hepsi `main` dalında, canlıda denendi ve kullanıcı bir sorun görmedi (görs
 - **Çözülen hata:** multer yükleme bitince istek bağlamını kaybediyordu ("Tenant context missing"); tenant baştan yakalanıp callback'te yeniden kuruluyor (`server/routes/tasks.ts`). Benzer akışlarda (stream olayı sonrası DB erişimi) aynı tuzağa dikkat.
 - **Eksikler:** mobil uygulamada görsel ekleme yok; düzenleme penceresinde sonradan görsel eklenemiyor; WAHA belgeleri JPEG öneriyor, PNG/WebP olduğu gibi gönderiliyor (sorun çıkarsa sunucuda JPEG'e çevirmek gerekir).
 
+### 6.5b Görevliden "Devam ediyorum" ve tamamlama tarihi (19 Ekim 2026)
+- `/t/:id` sayfasında kişi seçildikten sonra iki sekme var: **Devam ediyorum** ve **Görevi kapat**.
+- "Devam ediyorum": Yarın / 3 gün / 5 gün / 1 hafta / 15 gün. Tarih sunucuda İstanbul gününe göre hesaplanır, hafta sonu Pazartesi'ye kayar (`istanbulWorkingDay`, `src/lib/due-date.ts`). İstemci tarih gönderemez, yalnızca gün sayısı (1/3/5/7/15).
+- Her görevli **bir kez** tarih verir (`TaskAssignee.committedDueDate/committedAt`); tekrar denemesi 409. Görevin `dueDate`'i söz verilen tarihlerin en geçi olur, görev `IN_PROGRESS`'e geçer, gruba `TASK_COMMITTED` bildirimi gider. API: `POST /api/tasks/:id/progress { assigneeId, days }` (görev linki gibi girişsiz).
+- Görevi veren panelden tarihi değiştirirse yeni tarih tüm sözlere uygulanır, kilit kalır. Yeniden aktifleştirme sözleri sıfırlar.
+- DM hatırlatmaları her görevlinin kendi tarihini kullanır; "gecikenler" kapsamı görevlinin kendi tarihine de bakar.
+- Kanban/görev kartlarında "🔄 Ahmet · 25 Eki" satırı.
+- Görevi olmayan (görevlisiz) görevlerde yalnızca "Görevi kapat" görünür.
+
 ### 6.6 Yeni migration'lar
-`20261001000000_per_assignee_completion`, `20261001010000_app_settings`, `20261002000000_task_attachments`. Konteyner açılırken `scripts/entrypoint.sh` → `migrate-safe.mjs` otomatik uygular; **hata olursa sessizce geçer**, bu yüzden her deploy sonrası Coolify Runtime Logs'ta `migrate` aratıp bakın.
+`20261001000000_per_assignee_completion`, `20261001010000_app_settings`, `20261002000000_task_attachments`, `20261019000000_assignee_commitment`. Konteyner açılırken `scripts/entrypoint.sh` → `migrate-safe.mjs` otomatik uygular; **hata olursa sessizce geçer**, bu yüzden her deploy sonrası Coolify Runtime Logs'ta `migrate` aratıp bakın.
 
 ---
 

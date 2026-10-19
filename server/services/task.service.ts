@@ -5,6 +5,7 @@ import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
 import { enqueue, taskPayload, notificationView, pendingAssignees } from './delivery.service';
 import { contactResolver } from './contact-resolver.service';
 import { attachmentService, planImages } from './attachment.service';
+import { COMMIT_CHOICES, istanbulWorkingDay } from '../../src/lib/due-date';
 
 const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true, attachments: { orderBy: { createdAt: 'asc' as const } } };
 /**
@@ -119,7 +120,15 @@ export const taskService = {
           completionNote: data.completionNote?.trim() || 'Admin tarafından tamamlandı'
         } });
       } else if (isReactivating) {
-        await tx.taskAssignee.updateMany({ where: { taskId: id }, data: { completedAt: null, completedBy: null, completionNote: null } });
+        // A reactivated task starts over: assignees may promise a new date again.
+        await tx.taskAssignee.updateMany({ where: { taskId: id }, data: { completedAt: null, completedBy: null, completionNote: null, committedDueDate: null, committedAt: null } });
+      }
+
+      // The task creator's new date applies to everyone, including assignees who
+      // already promised one; they still cannot set another date themselves.
+      const newDue = data.dueDate !== undefined ? (data.dueDate ? new Date(data.dueDate) : null) : undefined;
+      if (!isReactivating && newDue !== undefined && newDue?.getTime() !== previous.dueDate?.getTime()) {
+        await tx.taskAssignee.updateMany({ where: { taskId: id, committedAt: { not: null } }, data: { committedDueDate: newDue } });
       }
 
       const updated = await tx.task.update({ where: { id }, data: {
@@ -185,6 +194,37 @@ export const taskService = {
       }
       const updated = await tx.task.update({ where: { id }, data: { status: 'DONE', completionNote: data.completionNote, completedBy: data.completedBy || null, completedAt: new Date() }, include });
       await queueTask(tx, updated, 'TASK_COMPLETED');
+      return updated;
+    });
+    return attachNotification(task);
+  },
+  /**
+   * An assignee takes the task on from its link and promises a date, once.
+   * The task's due date becomes the latest promised date and it moves to
+   * "in progress"; the group is told who took it on and until when.
+   */
+  async commitTask(id: string, data: { assigneeId: string; days: number }) {
+    if (!COMMIT_CHOICES.some(c => c.days === data.days)) throw new Error('Geçersiz süre');
+    const task = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`;
+      const previous = await tx.task.findUniqueOrThrow({ where: { id }, include });
+      if (previous.status === 'DONE') throw new Error('Görev zaten tamamlanmış');
+      const me = previous.assignees.find(a => a.id === data.assigneeId);
+      if (!me) throw new Error('Görevi üstlenen kişi seçilmelidir');
+      if (me.completedAt) throw new Error('Bu görevdeki payınızı zaten kapattınız');
+      if (me.committedAt) throw new Error('Bu görev için tarihi zaten verdiniz');
+      const promised = new Date(istanbulWorkingDay(data.days));
+      await tx.taskAssignee.update({ where: { id: me.id }, data: { committedDueDate: promised, committedAt: new Date() } });
+      const dates = [...previous.assignees.filter(a => a.id !== me.id && a.committedDueDate).map(a => a.committedDueDate!.getTime()), promised.getTime()];
+      const updated = await tx.task.update({ where: { id }, data: {
+        dueDate: new Date(Math.max(...dates)),
+        ...(previous.status === 'TODO' ? { status: 'IN_PROGRESS' } : {}),
+      }, include });
+      const name = me.contact?.displayName || me.contact?.pushName || contactResolver.getDisplayNameSync(me.contact?.id) || me.contact?.phoneNumber || 'Görevli';
+      await enqueue(tx, {
+        operationKey: `TASK_COMMITTED:${id}:${me.id}`, chatId: updated.chatId, taskId: id, kind: 'TASK_COMMITTED',
+        payload: taskPayload(updated, 'TASK_COMMITTED', { by: name, committedDate: promised.toISOString() }),
+      });
       return updated;
     });
     return attachNotification(task);

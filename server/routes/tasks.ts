@@ -172,6 +172,20 @@ router.get('/:id/attachments/:attId', publicTask(async (req, res) => {
   }
 }));
 
+// An assignee takes the task on from its link and promises a date, once.
+router.post('/:id/progress', publicTask(async (req, res) => {
+  const { assigneeId, days } = req.body || {};
+  if (typeof assigneeId !== 'string' || !Number.isInteger(days)) return res.status(400).json({ error: 'Kişi ve süre seçilmelidir' });
+  try {
+    const task = await taskService.commitTask(String(req.params.id), { assigneeId, days });
+    broadcastTaskUpdated(task);
+    res.json({ success: true, task });
+  } catch (error: any) {
+    // "zaten": date already given, part already closed or task already done.
+    res.status(/zaten/.test(error.message) ? 409 : /seçilmelidir|Geçersiz/.test(error.message) ? 400 : 500).json({ error: error.message });
+  }
+}));
+
 router.post('/:id/close', publicTask(async (req, res) => {
   try {
     const taskId = String(req.params.id);

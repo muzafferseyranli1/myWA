@@ -151,6 +151,44 @@ if (req.url === '/api/sendText') {
       assert.equal((await fetch(base+`/tasks/${a.id}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({completionNote:'done'})})).status,200);
       await gate(); await delivery.processOutbox();
     });
+    await t.test('an assignee promises a completion date once from the task link',async()=>{
+      const {istanbulWorkingDay}=await import('../src/lib/due-date');
+      await prisma.chat.upsert({where:{id:'commit@g.us'},create:{id:'commit@g.us',name:'Commit',isGroup:true},update:{}});
+      for(const [id,name] of [['905550000001@c.us','Ahmet'],['905550000002@c.us','Gamze']]) await prisma.contact.upsert({where:{id},create:{id,phoneNumber:id.split('@')[0],displayName:name},update:{}});
+      const task=await taskService.createTask({chatId:'commit@g.us',title:'commitment',notifyOnCreate:false,notifyAssigneesDirectly:true,dueDate:'2030-01-31',assigneeIds:['905550000001@c.us','905550000002@c.us']});
+      const [ahmet,gamze]=['905550000001@c.us','905550000002@c.us'].map(c=>task.assignees.find((a:any)=>a.contactId===c)!);
+      const progress=(body:any)=>fetch(base+`/tasks/${task.id}/progress`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      assert.equal((await progress({assigneeId:ahmet.id,days:2})).status,400,'only the offered choices are accepted');
+      assert.equal((await progress({days:3})).status,400,'the assignee must be chosen');
+      const first=await progress({assigneeId:ahmet.id,days:3}); assert.equal(first.status,200);
+      let row=await prisma.task.findUniqueOrThrow({where:{id:task.id},include:{assignees:true}});
+      assert.equal(row.status,'IN_PROGRESS');
+      assert.equal(row.dueDate!.toISOString().slice(0,10),istanbulWorkingDay(3),'the promise replaces the creator\'s date');
+      assert.equal(row.assignees.find(a=>a.id===ahmet.id)!.committedDueDate!.toISOString().slice(0,10),istanbulWorkingDay(3));
+      const notice=await prisma.outgoingJob.findFirstOrThrow({where:{taskId:task.id,kind:'TASK_COMMITTED'}});
+      assert.equal(notice.chatId,'commit@g.us'); assert.match((notice.payload as any).text,/Ahmet görevi üstlendi/);
+      assert.equal((await progress({assigneeId:ahmet.id,days:1})).status,409,'a date can be given only once');
+      assert.equal((await prisma.task.findUniqueOrThrow({where:{id:task.id}})).dueDate!.toISOString().slice(0,10),istanbulWorkingDay(3));
+      assert.equal((await progress({assigneeId:gamze.id,days:15})).status,200);
+      assert.equal((await prisma.task.findUniqueOrThrow({where:{id:task.id}})).dueDate!.toISOString().slice(0,10),istanbulWorkingDay(15),'the task is due on the latest promise');
+      // Each assignee is reminded of their own date: only Ahmet is overdue here.
+      await prisma.taskAssignee.update({where:{id:ahmet.id},data:{committedDueDate:new Date(Date.now()-2*86400000)}});
+      await prisma.$transaction(tx=>delivery.queueReminders(tx,'overdue',undefined,undefined,task.id));
+      const dms=await prisma.outgoingJob.findMany({where:{taskId:task.id,kind:'REMINDER_DM'}});
+      assert.deepEqual(dms.map(j=>j.chatId),['905550000001@c.us']);
+      // The creator can still move the date; it applies to every promise but the lock stays.
+      await taskService.updateTask(task.id,{dueDate:'2030-02-15'});
+      row=await prisma.task.findUniqueOrThrow({where:{id:task.id},include:{assignees:true}});
+      assert.ok(row.assignees.every(a=>a.committedDueDate!.toISOString().startsWith('2030-02-15')));
+      assert.equal((await progress({assigneeId:gamze.id,days:1})).status,409);
+      // A reactivated task starts over.
+      await taskService.updateTask(task.id,{status:'DONE'}); await taskService.updateTask(task.id,{status:'TODO',reactivateReason:'again'});
+      row=await prisma.task.findUniqueOrThrow({where:{id:task.id},include:{assignees:true}});
+      assert.ok(row.assignees.every(a=>!a.committedAt&&!a.committedDueDate));
+      assert.equal((await progress({assigneeId:gamze.id,days:5})).status,200);
+      // Later tests count reminders for every open task.
+      await taskService.deleteTask(task.id);
+    });
     await t.test('uncertain sends require explicit retry and preserve chat order',async()=>{
       const first=await delivery.enqueue(prisma,{operationKey:'unknown-first',chatId:'ordered@g.us',kind:'CHAT',payload:{text:'first'}});
       await delivery.enqueue(prisma,{operationKey:'ordered-second',chatId:'ordered@g.us',kind:'CHAT',payload:{text:'second'}});
@@ -197,10 +235,12 @@ if (req.url === '/api/sendText') {
       await Promise.all([delivery.runScheduler(late),delivery.runScheduler(late)]); assert.equal(await prisma.schedulerRun.count(),1);
       const reminder=await prisma.outgoingJob.findFirstOrThrow({where:{kind:'REMINDER'}});
       await taskService.closeTask(task.id,{completionNote:'before reminder'}); await gate(); const count=sent.length; await delivery.processOutbox();
-      assert.equal((await prisma.outgoingJob.findUniqueOrThrow({where:{id:reminder.id}})).status,'CANCELLED'); assert.equal(sent.length,count);
+      assert.equal((await prisma.outgoingJob.findUniqueOrThrow({where:{id:reminder.id}})).status,'CANCELLED');
+      // Greeting and sign-off framing may still go out; the summary itself must not.
+      assert.ok(!sent.slice(count).some(m=>String(m.text||m.caption||'').includes('GÖREV DURUMU')));
       const stale=await delivery.enqueue(prisma,{operationKey:'stale',chatId:'stale@g.us',kind:'REMINDER',payload:{taskIds:[task.id],day:'2020-01-01'}});
       // Drain queued jobs before checking the stale reminder.
-      for(let i=0;i<4;i++){await gate();await delivery.processOutbox();}
+      for(let i=0;i<10;i++){await gate();await delivery.processOutbox();}
       assert.equal((await prisma.outgoingJob.findUniqueOrThrow({where:{id:stale.id}})).status,'CANCELLED');
     });
     await t.test('upload quota rejects before creating a second file and rate is per user',async()=>{

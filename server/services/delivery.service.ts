@@ -34,8 +34,8 @@ export async function enqueue(db: DB, data: { operationKey: string; chatId: stri
 export const pendingAssignees = (task: any): any[] => (task.assignees || []).filter((a: any) => !a.completedAt);
 export function taskPayload(
   task: any,
-  kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED' | 'TASK_CREATED_DM',
-  extra?: { reason?: string; by?: string; groupName?: string; recipientName?: string; assigneeId?: string; completedAssignee?: string }
+  kind: 'TASK_CREATED' | 'TASK_COMPLETED' | 'TASK_REACTIVATED' | 'TASK_CREATED_DM' | 'TASK_COMMITTED',
+  extra?: { reason?: string; by?: string; groupName?: string; recipientName?: string; assigneeId?: string; completedAssignee?: string; committedDate?: string }
 ) {
   const mentions: string[] = [];
   const tags = task.assignees?.map((a: any) => {
@@ -75,6 +75,18 @@ export function taskPayload(
     }
     text += `\n🔗 Görevi incele: ${taskUrl}`;
     return { text, mentions: [], url: taskUrl, linkPreview: false };
+  }
+
+  if (kind === 'TASK_COMMITTED') {
+    // An assignee took the task on from its link and promised a date.
+    text = `🔄 *${extra?.by || 'Görevli'} görevi üstlendi*
+
+*${cleanTitle}*
+📅 *Tamamlama tarihi:* ${formatDateTR(new Date(extra?.committedDate || task.dueDate))}
+`;
+    text += `
+🔗 Görevi incele: ${taskUrl}`;
+    return { text, mentions: [], url: taskUrl, replyTo: task.sourceMessageId || undefined, linkPreview: false };
   }
 
   if (kind === 'TASK_COMPLETED' && extra?.completedAssignee) {
@@ -351,7 +363,9 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
     const now = new Date();
     const recipient = payload.recipientName ? `@${payload.recipientName.trim().replace(/^@/, '')}` : 'Görevli';
 
-    const hasOverdue = tasks.some(t => t.dueDate && getDaysDiff(new Date(t.dueDate), now) < 0);
+    // Each assignee is reminded of the date they promised, if they gave one.
+    const dueFor = (t: typeof tasks[number]) => t.assignees.find(a => a.contactId === payload.contactId)?.committedDueDate || t.dueDate;
+    const hasOverdue = tasks.some(t => { const due = dueFor(t); return due && getDaysDiff(new Date(due), now) < 0; });
     const headingNotice = hasOverdue
       ? 'Süresi geçtiği halde tamamlanmayan görevleriniz bulunmaktadır:'
       : 'Takip etmeniz gereken görevleriniz bulunmaktadır:';
@@ -363,9 +377,10 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
       const rawUrl = `${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}${mine ? `?a=${mine.id}` : ''}`;
       const shortLink = await urlShortenerService.shortenUrl(rawUrl);
 
+      const due = dueFor(task);
       let timeBadge = '';
-      if (task.dueDate) {
-        const diff = getDaysDiff(new Date(task.dueDate), now);
+      if (due) {
+        const diff = getDaysDiff(new Date(due), now);
         if (diff < 0) {
           timeBadge = `⏰ ${Math.abs(diff)} gündür gecikiyor!`;
         } else if (diff === 0) {
@@ -377,7 +392,7 @@ export async function renderJob(job: OutgoingJob): Promise<{ text: string; menti
         timeBadge = '⏳ Tarih belirtilmedi';
       }
 
-      const dateStr = task.dueDate ? formatDateTR(new Date(task.dueDate)) : 'Belirtilmedi';
+      const dateStr = due ? formatDateTR(new Date(due)) : 'Belirtilmedi';
 
       return `${idx + 1}. 📋 *${cleanTitle}*${groupName}\n   🗓️ Bitiş: ${dateStr} | ${timeBadge}\n   🔗 Kapat: ${shortLink}`;
     }));
@@ -465,10 +480,13 @@ export async function processOutbox() {
 
 export async function queueReminders(db: DB, scope: string, chatId?: string, day?: string, taskId?: string) {
   const now = new Date();
+  const window: { lt?: Date; gte?: Date; lte?: Date } | null = scope === 'overdue' ? { lt: now } : scope === 'due_soon' ? { gte: now, lte: new Date(now.getTime() + 3 * 86400000) } : null;
   const tasks = await db.task.findMany({ where: {
     status: { not: 'DONE' }, ...(chatId ? { chatId } : {}), ...(taskId ? { id: taskId } : {}),
-    ...(scope === 'overdue' ? { dueDate: { lt: now } } : scope === 'due_soon' ? { dueDate: { gte: now, lte: new Date(now.getTime() + 3 * 86400000) } } : {}),
+    // An assignee's own promised date can be earlier than the task's latest one.
+    ...(window ? { OR: [{ dueDate: window }, { assignees: { some: { completedAt: null, committedDueDate: window } } }] } : {}),
   }, include: { assignees: { include: { contact: true } }, chat: true } });
+  const inScope = (due: Date | null) => !window || (!!due && (!window.lt || due < window.lt) && (!window.gte || due >= window.gte) && (!window.lte || due <= window.lte));
 
   const groups = new Map<string, string[]>();
   for (const task of tasks) groups.set(task.chatId, [...(groups.get(task.chatId) || []), task.id]);
@@ -488,6 +506,7 @@ export async function queueReminders(db: DB, scope: string, chatId?: string, day
     if ((task as any).notifyAssigneesDirectly && task.assignees?.length) {
       for (const a of task.assignees) {
         if (a.completedAt) continue; // already finished their part
+        if (!inScope(a.committedDueDate || task.dueDate)) continue; // their own date is not due yet
         const dmChatId = contactResolver.resolveDirectChatId(a.contact);
         if (dmChatId && dmChatId !== task.chatId) {
           const entry = directAssigneeTasks.get(dmChatId) || { contact: a.contact, taskIds: [] };
