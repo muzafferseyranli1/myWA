@@ -121,6 +121,16 @@ export class WAHAService {
     await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName, enabled: true }, update: { enabled: true } });
     this.failures = 0;
     this.nextRecoveryAt = 0;
+    // A FAILED session keeps crashing on credentials the phone no longer accepts,
+    // so restarting never reaches a QR code. When the user explicitly asks to
+    // connect, drop those credentials so a fresh QR is issued. This is not done
+    // automatically: a brief WhatsApp outage can also mark a paired session FAILED.
+    const session = await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, {}, 5000).then(r => r.json()).catch(() => null);
+    if (session?.status === 'FAILED') {
+      await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/stop`, { method: 'POST' }).catch(() => {});
+      await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/logout`, { method: 'POST' }).catch(() => {});
+      await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}/start`, { method: 'POST' }).catch(() => {});
+    }
     await this.reconcile();
     return true;
   }

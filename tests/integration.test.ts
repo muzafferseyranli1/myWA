@@ -313,6 +313,12 @@ if (req.url === '/api/sendText') {
       const previewMsg=await prisma.message.findUniqueOrThrow({where:{id:'preview-msg-id'}});
       assert.equal((previewMsg.preview as any)?.title,'Example Title');
     });
+    await t.test('connecting a FAILED session drops its stale credentials; a working one is left alone',async()=>{
+      state='FAILED'; calls.length=0; await wahaService.startSession().catch(()=>{});
+      assert.ok(calls.some(c=>c.endsWith('/logout')),'FAILED session is logged out before a new QR');
+      state='WORKING'; calls.length=0; await wahaService.startSession();
+      assert.ok(!calls.some(c=>c.endsWith('/logout')),'a paired session is never logged out');
+    });
     await t.test('tenants are isolated: a second user reaches none of the first user\'s data',async()=>{
       const other=await tenantLib.systemDb().user.create({data:{username:'other-user',passwordHash:'!',displayName:'Other',role:'USER'}});
       const otherTenant=(await tenantLib.provisionTenant(other.id))!;
