@@ -129,7 +129,7 @@ model Message {
 
   chat    Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender  Contact? @relation("sender", fields: [senderId], references: [id], onDelete: SetNull)
-  task    Task?    @relation("sourceMessage")
+  tasks   Task[]   @relation("sourceMessage")
   reads   MessageRead[]
 
   @@index([chatId, timestamp])
@@ -140,7 +140,7 @@ model Task {
   id              String       @id @default(uuid())
   requestKey      String?      @unique @map("request_key")
   chatId          String       @map("chat_id")
-  sourceMessageId String?      @unique @map("source_message_id")
+  sourceMessageId String?      @map("source_message_id")
   title           String
   description     String?
   status          TaskStatus   @default(TODO)
@@ -163,6 +163,7 @@ model Task {
   attachments   TaskAttachment[]
 
   @@index([chatId, status])
+  @@index([sourceMessageId])
   @@index([status])
   @@index([dueDate])
   @@map("tasks")

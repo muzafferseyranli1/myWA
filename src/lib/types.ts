@@ -45,7 +45,7 @@ export interface MessageItem {
   isFromMe: boolean;
   timestamp: string;
   sender?: ContactItem | null;
-  task?: TaskItem | null;
+  tasks?: TaskItem[];
 }
 
 export interface TaskItem {

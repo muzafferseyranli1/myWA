@@ -151,7 +151,8 @@ export const messageService = {
       take: limit,
       include: {
         sender: true,
-        task: {
+        tasks: {
+          orderBy: { createdAt: 'asc' },
           include: {
             assignees: {
               include: {

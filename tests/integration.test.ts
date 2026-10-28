@@ -189,6 +189,14 @@ if (req.url === '/api/sendText') {
       // Later tests count reminders for every open task.
       await taskService.deleteTask(task.id);
     });
+    await t.test('one message can be the source of several tasks',async()=>{
+      const source=await prisma.message.create({data:{id:'todo-list',chatId:'tasks@g.us',body:'1. first item, 2. second item',timestamp:new Date()}});
+      const a=await taskService.createTask({chatId:'tasks@g.us',title:'first item',notifyOnCreate:false,sourceMessageId:source.id});
+      const b=await taskService.createTask({chatId:'tasks@g.us',title:'second item',notifyOnCreate:false,sourceMessageId:source.id});
+      assert.notEqual(a.id,b.id);
+      assert.equal(await prisma.task.count({where:{sourceMessageId:source.id}}),2);
+      await taskService.deleteTask(a.id); await taskService.deleteTask(b.id);
+    });
     await t.test('uncertain sends require explicit retry and preserve chat order',async()=>{
       const first=await delivery.enqueue(prisma,{operationKey:'unknown-first',chatId:'ordered@g.us',kind:'CHAT',payload:{text:'first'}});
       await delivery.enqueue(prisma,{operationKey:'ordered-second',chatId:'ordered@g.us',kind:'CHAT',payload:{text:'second'}});

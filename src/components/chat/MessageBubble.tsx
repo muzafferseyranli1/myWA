@@ -49,7 +49,7 @@ export default function MessageBubble({message,isOwn,onCreateTask,contacts=[]}:{
   </div>
   {!!reactions.length && <div className="mt-1 flex flex-wrap gap-1">{reactions.map((r:any)=><span key={r.senderId} title={nameOf(r.senderId,contacts)} className="rounded-full border border-[#e9edef] bg-white px-2 py-0.5 text-sm">{r.text}</span>)}</div>}
   <button onClick={onCreateTask} title="Mesajdan görev oluştur" className="absolute right-1 top-1 rounded-full border border-[#e9edef] bg-white p-1.5 text-[#667781] opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:hidden"><Pin size={15}/></button>
-  {message.task && <div className="mt-2 border-t border-black/10 pt-2 text-xs text-[#008069]">Görev: {message.task.title}</div>}
+  {!!message.tasks?.length && <div className="mt-2 border-t border-black/10 pt-2 text-xs text-[#008069]">{message.tasks.length > 1 ? `${message.tasks.length} görev: ` : 'Görev: '}{message.tasks.map((t: any) => t.title).join(' · ')}</div>}
   {zoom && <div role="dialog" aria-label="Fotoğraf" className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-3 sm:p-6" onClick={()=>setZoom(false)}><button className="absolute right-3 top-3 rounded bg-white px-4 py-2 text-black sm:right-6 sm:top-4">Kapat</button><img src={media} alt={message.mediaName || 'Fotoğraf'} className="max-h-[85vh] max-w-full object-contain"/></div>}
  </div>;
 }
