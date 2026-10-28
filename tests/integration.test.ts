@@ -234,7 +234,9 @@ if (req.url === '/api/sendText') {
       const late=new Date(); late.setUTCHours(8,0,0);
       await Promise.all([delivery.runScheduler(late),delivery.runScheduler(late)]); assert.equal(await prisma.schedulerRun.count(),1);
       const reminder=await prisma.outgoingJob.findFirstOrThrow({where:{kind:'REMINDER'}});
-      await taskService.closeTask(task.id,{completionNote:'before reminder'}); await gate(); const count=sent.length; await delivery.processOutbox();
+      await taskService.closeTask(task.id,{completionNote:'before reminder'}); const count=sent.length;
+      // The greeting is queued ahead of the summary in the same chat; drain both.
+      for(let i=0;i<4;i++){await gate();await delivery.processOutbox();}
       assert.equal((await prisma.outgoingJob.findUniqueOrThrow({where:{id:reminder.id}})).status,'CANCELLED');
       // Greeting and sign-off framing may still go out; the summary itself must not.
       assert.ok(!sent.slice(count).some(m=>String(m.text||m.caption||'').includes('GÖREV DURUMU')));

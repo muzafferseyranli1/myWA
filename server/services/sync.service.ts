@@ -8,11 +8,13 @@ import { contactResolver } from './contact-resolver.service';
 import { currentTenant, tenantScoped } from '../lib/tenant';
 
 // Discovery cursor and avatar back-off are kept per tenant.
-const state = tenantScoped('sync', () => ({ discoveryOffset: 0, avatarChecked: new Map<string, number>(), fullScanAt: 0 }));
+const state = tenantScoped('sync', () => ({ discoveryOffset: 0, avatarChecked: new Map<string, number>(), pairedAt: 0, rescans: 0 }));
 // WhatsApp delivers the pre-link history to the store minutes after pairing, with
-// old timestamps the incremental cursor has already passed. A periodic round
-// from timestamp 0 picks those up; already imported messages are deduplicated.
-const FULL_SCAN_INTERVAL = 30 * 60 * 1000;
+// old timestamps the incremental cursor has already passed. After a new pairing
+// the store is read once more from timestamp 0 at these delays. A full pass over
+// a large store takes a long time and keeps the database busy, so it must never
+// run on a fixed interval; already imported messages are deduplicated.
+const RESCAN_AFTER_PAIRING = [10 * 60 * 1000, 60 * 60 * 1000];
 
 /**
  * Eksik profil resmi olan sohbetlerin avatarlarını arka planda WAHA'dan çeker
@@ -93,8 +95,10 @@ export async function syncHistory() {
   let sync = await prisma.syncState.upsert({ where: { session }, create: { session }, update: {} });
   try {
     if (!sync.roundUntil) {
-      const full = Date.now() - state.fullScanAt > FULL_SCAN_INTERVAL;
-      if (full) state.fullScanAt = Date.now();
+      const pairedAt = wahaService.getPairedAt();
+      if (pairedAt !== state.pairedAt) { state.pairedAt = pairedAt; state.rescans = 0; }
+      const full = pairedAt > 0 && state.rescans < RESCAN_AFTER_PAIRING.length && Date.now() - pairedAt >= RESCAN_AFTER_PAIRING[state.rescans];
+      if (full) state.rescans++;
       sync = await prisma.syncState.update({ where: { session }, data: { roundUntil: Math.floor(Date.now()/1000), offset: 0, ...(full ? { completedUntil: 0 } : {}) } });
     }
     const messages = await wahaService.getHistory(sync.offset, Math.max(0, sync.completedUntil - 120), sync.roundUntil!);

@@ -5,6 +5,9 @@ import type { CreateTaskRequest, UpdateTaskRequest } from '../../src/lib/types';
 import { enqueue, taskPayload, notificationView, pendingAssignees } from './delivery.service';
 import { contactResolver } from './contact-resolver.service';
 import { attachmentService, planImages } from './attachment.service';
+
+// Task writes queue notifications inside the transaction; under load 5 s (the default) is too tight.
+const TX = { timeout: 15_000, maxWait: 10_000 };
 import { COMMIT_CHOICES, istanbulWorkingDay } from '../../src/lib/due-date';
 
 const include = { assignees: { include: { contact: true } }, chat: true, sourceMessage: true, attachments: { orderBy: { createdAt: 'asc' as const } } };
@@ -95,7 +98,7 @@ export const taskService = {
       const withFiles = data.attachmentIds?.length ? await tx.task.findUniqueOrThrow({ where: { id: created.id }, include }) : created;
       if (withFiles.notifyOnCreate) await queueTask(tx, withFiles, 'TASK_CREATED');
       return withFiles;
-    });
+    }, TX);
     return attachNotification(task);
   },
   async updateTask(id: string, data: UpdateTaskRequest) {
@@ -163,7 +166,7 @@ export const taskService = {
       }
 
       return updated;
-    });
+    }, TX);
     return attachNotification(task);
   },
   /**
@@ -195,7 +198,7 @@ export const taskService = {
       const updated = await tx.task.update({ where: { id }, data: { status: 'DONE', completionNote: data.completionNote, completedBy: data.completedBy || null, completedAt: new Date() }, include });
       await queueTask(tx, updated, 'TASK_COMPLETED');
       return updated;
-    });
+    }, TX);
     return attachNotification(task);
   },
   /**
@@ -226,7 +229,7 @@ export const taskService = {
         payload: taskPayload(updated, 'TASK_COMMITTED', { by: name, committedDate: promised.toISOString() }),
       });
       return updated;
-    });
+    }, TX);
     return attachNotification(task);
   },
   async deleteTask(id: string) {

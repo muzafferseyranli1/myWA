@@ -13,6 +13,7 @@ export class WAHAService {
   private baseUrl = (process.env.WAHA_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
   private currentStatus = 'disconnected';
   private myJid: string | null = null;
+  private pairedAt = 0;
   private currentQr: string | null = null;
   private failures = 0;
   private nextRecoveryAt = 0;
@@ -30,6 +31,8 @@ export class WAHAService {
   }
   private setStatus(status: string, qr: string | null = null) {
     const changed = this.currentStatus !== status || this.currentQr !== qr;
+    // Going from a QR code to connected means the phone was just linked.
+    if (this.currentStatus === 'qr' && status === 'connected') this.pairedAt = Date.now();
     this.currentStatus = status;
     this.currentQr = qr;
     if (changed) this.onStatus?.(status);
@@ -37,6 +40,8 @@ export class WAHAService {
   }
   public getStatus() { return { status: this.currentStatus, qr: this.currentQr, myJid: this.myJid }; }
   public getSessionName() { return this.sessionName; }
+  /** When the phone was last linked through a QR or pairing code in this process (0 if never). */
+  public getPairedAt() { return this.pairedAt; }
   private async rememberSelf(me: any) {
     if (!me?.id || typeof me.id !== 'string') return;
     this.myJid = me.id;
