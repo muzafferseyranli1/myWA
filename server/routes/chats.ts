@@ -16,19 +16,24 @@ router.get('/',async(req,res)=>{
       ]
     },
     orderBy:{updatedAt:'desc'},
-    include:{_count:{select:{tasks:true,messages:true}},messages:{orderBy:[{timestamp:'desc'},{id:'desc'}],take:1}}
+    include:{_count:{select:{tasks:true}}}
   });
+  // One index lookup per chat. Prisma's include { take: 1 } read every message
+  // of every chat (seconds on a large account) and starved the connection pool.
+  const last=await prisma.$queryRaw<any[]>`SELECT m.id,m.chat_id AS "chatId",m.sender_id AS "senderId",m.body,m.message_type::text AS "messageType",m.is_from_me AS "isFromMe",m.timestamp,m.revoked,m.ack
+    FROM chats c CROSS JOIN LATERAL (SELECT * FROM messages WHERE chat_id=c.id ORDER BY timestamp DESC,id DESC LIMIT 1) m`;
+  const lastByChat=new Map(last.map(m=>[m.chatId,m]));
   const counts=await prisma.$queryRaw<{chat_id:string;count:bigint}[]>`SELECT m.chat_id,COUNT(*) AS count FROM messages m LEFT JOIN message_reads r ON r.message_id=m.id AND r.user_id=${(req as any).user.id} WHERE m.is_from_me=false AND m.revoked=false AND m.chat_id != 'status@broadcast' AND m.chat_id NOT LIKE '%@broadcast' AND r.message_id IS NULL GROUP BY m.chat_id`;
   const unread=new Map(counts.map(row=>[row.chat_id,Number(row.count)]));
 
   // Aktif LID sohbetlerinin kimlikleri (mesajı veya görevi olan)
   const activeLidChatIds = new Set(
-    chats.filter(c => c.id.endsWith('@lid') && (c._count.messages > 0 || c._count.tasks > 0)).map(c => c.id)
+    chats.filter(c => c.id.endsWith('@lid') && (lastByChat.has(c.id) || c._count.tasks > 0)).map(c => c.id)
   );
 
   // Mükerrer 0 mesajlı telefon sohbetlerini filtrele
   const filteredChats = chats.filter(chat => {
-    if (!chat.isGroup && (chat.id.endsWith('@c.us') || chat.id.endsWith('@s.whatsapp.net')) && chat._count.messages === 0) {
+    if (!chat.isGroup && (chat.id.endsWith('@c.us') || chat.id.endsWith('@s.whatsapp.net')) && !lastByChat.has(chat.id)) {
       const correspondingLid = contactResolver.getLidByPhone(chat.id);
       if (correspondingLid && activeLidChatIds.has(correspondingLid)) {
         return false;
@@ -38,11 +43,12 @@ router.get('/',async(req,res)=>{
   });
 
   res.json(filteredChats.map(chat=>{
-   const {messages,_count,...rest}=chat;
+   const {_count,...rest}=chat;
+   const lastMessage=lastByChat.get(chat.id);
    const resolved=contactResolver.getDisplayNameSync(chat.id);
    const name=!chat.isGroup&&resolved&&!resolved.includes('@')&&!/^\d+$/.test(resolved)?resolved:chat.name;
    const avatarUrl=chat.avatarUrl||contactResolver.getAvatarSync(chat.id)||null;
-   return {...rest,name,avatarUrl,unreadCount:unread.get(chat.id)||0,lastMessage:messages[0]?{...messages[0],mediaUrl:null}:null};
+   return {...rest,name,avatarUrl,unreadCount:unread.get(chat.id)||0,lastMessage:lastMessage?{...lastMessage,mediaUrl:null}:null};
   }));
  }catch{res.status(500).json({error:'Sohbetler alınamadı.'});}
 });

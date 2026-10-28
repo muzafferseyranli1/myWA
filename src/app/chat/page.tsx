@@ -61,7 +61,9 @@ export default function ChatDashboard(){
   const disconnected=()=>setSocketOnline(false);
   const onMessage=(m:any)=>{if(m.chatId===activeChat.current)setMessages(prev=>merge(prev,[m]));};
   const onUpdated=(m:any)=>{if(m.chatId===activeChat.current){setMessages(prev=>prev.map(old=>old.id===m.id?{...old,...m}:old));void fetchData(m.chatId);}};
-  const onChat=()=>void fetchChats();
+  // A busy group sends many chat_updated events; reload the list at most every 2 s.
+  let chatTimer:ReturnType<typeof setTimeout>|null=null;
+  const onChat=()=>{if(!chatTimer)chatTimer=setTimeout(()=>{chatTimer=null;void fetchChats();},2000);};
   const onTask=()=>{if(activeChat.current)void fetchData(activeChat.current);};
   const onStatus=(data:any)=>{setStatus(data.status||data);setQr(data.qr||'');if(data.myJid)setMyJid(data.myJid);};
   const onArrived=(m:any)=>{
@@ -79,7 +81,7 @@ export default function ChatDashboard(){
   socket.connect();refresh();
   const focus=()=>refresh();window.addEventListener('focus',focus);
   const interval=setInterval(()=>{void fetchChats();void fetchStatus();if(activeChat.current)void fetchData(activeChat.current);},10000);
-  return ()=>{closed=true;clearInterval(interval);window.removeEventListener('focus',focus);socket.off('connect',refresh);socket.off('disconnect',disconnected);socket.off('new_message',onMessage);socket.off('message_updated',onUpdated);socket.off('message_arrived',onArrived);socket.off('chat_updated',onChat);socket.off('notification_updated',onTask);socket.off('task_created',onTask);socket.off('task_updated',onTask);socket.off('task_deleted',onTask);socket.off('whatsapp_status',onStatus);};
+  return ()=>{closed=true;clearInterval(interval);if(chatTimer)clearTimeout(chatTimer);window.removeEventListener('focus',focus);socket.off('connect',refresh);socket.off('disconnect',disconnected);socket.off('new_message',onMessage);socket.off('message_updated',onUpdated);socket.off('message_arrived',onArrived);socket.off('chat_updated',onChat);socket.off('notification_updated',onTask);socket.off('task_created',onTask);socket.off('task_updated',onTask);socket.off('task_deleted',onTask);socket.off('whatsapp_status',onStatus);};
  },[router,fetchChats,fetchStatus,fetchData,fetchContacts,selectChat]);
  useEffect(()=>{const count=chats.reduce((sum,c)=>sum+(c.unreadCount||0),0);document.title=(count?'('+count+') ':'')+'MyWA';},[chats]);
  const read=useCallback(async(ids:string[])=>{

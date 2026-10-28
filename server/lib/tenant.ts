@@ -36,7 +36,7 @@ const SESSION = /^[a-zA-Z0-9_-]{1,64}$/;
 function schemaUrl(schema: string) {
   const url = new URL(process.env.DATABASE_URL!);
   url.searchParams.set('schema', schema);
-  if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '5');
+  if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '8');
   return url.href;
 }
 
@@ -45,7 +45,10 @@ let system: PrismaClient | null = null;
 export function systemDb(): PrismaClient {
   if (!system) {
     const g = globalThis as any;
-    system = g._mywaSystemPrisma ||= new PrismaClient({ log: ['error'] });
+    // Prisma's default pool (2 x CPUs + 1, 7 here) was exhausted under load.
+    const url = new URL(process.env.DATABASE_URL!);
+    if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '15');
+    system = g._mywaSystemPrisma ||= new PrismaClient({ datasources: { db: { url: url.href } }, log: ['error'] });
   }
   return system!;
 }

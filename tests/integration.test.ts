@@ -292,6 +292,8 @@ if (req.url === '/api/sendText') {
       assert.equal(await prisma.messageRead.count({where:{userId:'test-user'}}),2);
       assert.equal(await prisma.messageRead.count({where:{messageId:'cursor-c'}}),0);
       const chats=await(await fetch(base+'/chats',{headers})).json();assert.ok(chats.find((c:any)=>c.id===event.payload.from).unreadCount>0);
+      // The list shows each chat's newest message.
+      assert.equal(chats.find((c:any)=>c.id===event.payload.from).lastMessage.id,'newer-record');
     });
     await t.test('real ACK, edit, reaction, call and link preview update stored messages',async()=>{
       await hook({event:'message.ack',session:'default',id:'ack-read',payload:{id:event.payload.id,ack:3}});await delivery.processInbox();

@@ -122,6 +122,7 @@ export async function syncHistory() {
     await prisma.syncState.update({ where: { session }, data: complete ? { completedUntil: sync.roundUntil!, roundUntil: null, offset: 0, lastSuccessAt: new Date(), lastError: null } : { offset: sync.offset + 100, lastError: null } });
     const chats = await wahaService.getChatOverview(state.discoveryOffset);
     if (!Array.isArray(chats)) throw new Error('Unexpected chat response');
+    let changed = false;
     for (const chat of chats) {
       if (typeof chat.id !== 'string' || !chat.id.includes('@')) continue;
       if (isStatusOrBroadcast(chat.id)) continue;
@@ -172,6 +173,10 @@ export async function syncHistory() {
 
       const current = await prisma.chat.findUnique({ where: { id: chat.id } });
       const effectiveTime = current && current.updatedAt > timestamp ? current.updatedAt : timestamp;
+      // Discovery walks every chat again and again; unchanged chats are neither
+      // written nor announced, or every open panel reloads its list each pass.
+      if (current && (!chat.name || chat.name === current.name) && (!chat.picture || chat.picture === current.avatarUrl) && effectiveTime.getTime() === current.updatedAt.getTime()) continue;
+      changed = true;
       await prisma.chat.upsert({
         where: { id: chat.id },
         create: {
@@ -189,7 +194,7 @@ export async function syncHistory() {
       });
     }
     state.discoveryOffset = chats.length ? state.discoveryOffset + 100 : 0;
-    if (chats.length) events.emit('chat_updated');
+    if (changed) events.emit('chat_updated');
 
     // Eksik profil resimlerini arka planda WAHA'dan tamamla
     await syncMissingAvatars();
