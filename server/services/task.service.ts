@@ -77,7 +77,7 @@ function validate(data: any, creating = false) {
   if (data.clientRequestId !== undefined && (typeof data.clientRequestId !== 'string' || !data.clientRequestId || data.clientRequestId.length > 128)) throw new Error('Geçersiz işlem kimliği');
 }
 export const taskService = {
-  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; notifyAssigneesDirectly?: boolean; clientRequestId?: string; attachmentIds?: string[] }) {
+  async createTask(data: CreateTaskRequest & { createdBy?: string; notifyOnCreate?: boolean; notifyAssigneesDirectly?: boolean; clientRequestId?: string; attachmentIds?: string[]; announceBy?: string }) {
     validate(data, true);
     const requestKey = `${data.createdBy}:${data.clientRequestId || randomUUID()}`;
     const task = await prisma.$transaction(async tx => {
@@ -96,7 +96,7 @@ export const taskService = {
       }, include });
       if (data.attachmentIds?.length) await attachmentService.link(tx, created.id, data.attachmentIds);
       const withFiles = data.attachmentIds?.length ? await tx.task.findUniqueOrThrow({ where: { id: created.id }, include }) : created;
-      if (withFiles.notifyOnCreate) await queueTask(tx, withFiles, 'TASK_CREATED');
+      if (withFiles.notifyOnCreate) await queueTask(tx, withFiles, 'TASK_CREATED', data.announceBy ? { by: data.announceBy } : undefined);
       return withFiles;
     }, TX);
     return attachNotification(task);

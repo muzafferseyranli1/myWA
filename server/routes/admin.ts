@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth';
 import { authService } from '../services/auth.service';
-import { wahaService } from '../services/waha.service';
+import bcrypt from 'bcryptjs';
+import { wahaService, WAHAService } from '../services/waha.service';
+import { prisma } from '../lib/prisma';
+import { boardSlug } from '../services/board.service';
 import { disconnectTenant } from '../sockets';
 import { getNotificationSettings, saveNotificationSettings } from '../lib/notification-settings';
 import { parseNotificationSettings } from '../lib/quiet-hours';
@@ -82,6 +85,70 @@ router.patch('/users/:id', async (req: any, res) => {
     console.error('[admin] Update user failed:', error.message);
     res.status(500).json({ error: 'Kullanıcı güncellenemedi' });
   }
+});
+
+// Permanently removes a disabled account: its WhatsApp session, its schema with
+// every chat, message and task, and the account itself. Cannot be undone.
+router.delete('/users/:id', async (req: any, res) => {
+  const id = String(req.params.id);
+  try {
+    const user = await systemDb().user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    if (id === req.user.id || user.role === 'ADMIN') return res.status(400).json({ error: 'Yönetici hesapları silinemez' });
+    if (user.isActive) return res.status(409).json({ error: 'Önce hesabı devre dışı bırakın' });
+    if (user.tenantSchema === 'public') return res.status(400).json({ error: 'Ana veri alanı silinemez' });
+    if (await systemDb().sharedBoard.count({ where: { ownerId: id } })) return res.status(409).json({ error: 'Bu kullanıcıya ait ortak panolar var' });
+    if (user.wahaSession) await new WAHAService(user.wahaSession).deleteSession();
+    if (user.tenantSchema && /^t_[a-z0-9]{8,32}$/.test(user.tenantSchema)) await systemDb().$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${user.tenantSchema}" CASCADE`);
+    await systemDb().user.delete({ where: { id } });
+    await loadTenants();
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('[admin] Delete user failed:', error.message);
+    res.status(500).json({ error: 'Kullanıcı silinemedi' });
+  }
+});
+
+// Shared group boards. The board shows one group's tasks from every account to
+// anyone with its password; new tasks added there belong to the creating admin.
+const boardView = async (b: any) => ({
+  id: b.id, slug: b.slug, title: b.title, chatId: b.chatId, isActive: b.isActive, createdAt: b.createdAt,
+  chatName: (await prisma.chat.findUnique({ where: { id: b.chatId }, select: { name: true } }))?.name || b.chatId,
+});
+router.get('/boards', async (req: any, res) => {
+  try { res.json(await Promise.all((await systemDb().sharedBoard.findMany({ where: { ownerId: req.user.id }, orderBy: { createdAt: 'asc' } })).map(boardView))); }
+  catch { res.status(503).json({ error: 'Panolar alınamadı' }); }
+});
+router.get('/board-chats', async (_req, res) => {
+  try { res.json(await prisma.chat.findMany({ where: { isGroup: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })); }
+  catch { res.status(503).json({ error: 'Gruplar alınamadı' }); }
+});
+router.post('/boards', async (req: any, res) => {
+  const { chatId, title, password } = req.body || {};
+  if (typeof password !== 'string' || password.length < 6 || password.length > 200) return res.status(400).json({ error: 'Pano şifresi en az 6 karakter olmalı' });
+  try {
+    const chat = typeof chatId === 'string' ? await prisma.chat.findUnique({ where: { id: chatId } }) : null;
+    if (!chat || !chat.isGroup) return res.status(400).json({ error: 'Bir WhatsApp grubu seçin' });
+    const name = typeof title === 'string' && title.trim() ? title.trim().slice(0, 100) : chat.name;
+    const board = await systemDb().sharedBoard.create({ data: { slug: boardSlug(name), chatId, title: name, passwordHash: await bcrypt.hash(password, 10), ownerId: req.user.id } });
+    res.status(201).json(await boardView(board));
+  } catch { res.status(500).json({ error: 'Pano oluşturulamadı' }); }
+});
+router.patch('/boards/:id', async (req: any, res) => {
+  const { password, isActive, title } = req.body || {};
+  if (password !== undefined && (typeof password !== 'string' || password.length < 6 || password.length > 200)) return res.status(400).json({ error: 'Pano şifresi en az 6 karakter olmalı' });
+  if (isActive !== undefined && typeof isActive !== 'boolean') return res.status(400).json({ error: 'Geçersiz durum' });
+  if (title !== undefined && (typeof title !== 'string' || !title.trim())) return res.status(400).json({ error: 'Geçersiz başlık' });
+  try {
+    const existing = await systemDb().sharedBoard.findFirst({ where: { id: String(req.params.id), ownerId: req.user.id } });
+    if (!existing) return res.status(404).json({ error: 'Pano bulunamadı' });
+    const board = await systemDb().sharedBoard.update({ where: { id: existing.id }, data: {
+      ...(password !== undefined ? { passwordHash: await bcrypt.hash(password, 10) } : {}),
+      ...(isActive !== undefined ? { isActive } : {}),
+      ...(title !== undefined ? { title: title.trim().slice(0, 100) } : {}),
+    } });
+    res.json(await boardView(board));
+  } catch { res.status(500).json({ error: 'Pano güncellenemedi' }); }
 });
 
 // Quiet hours and summary times, shared by every user's notifications.

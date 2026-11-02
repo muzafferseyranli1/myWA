@@ -8,6 +8,7 @@ import { contactResolver } from './contact-resolver.service';
 import { urlShortenerService } from './url-shortener.service';
 import { mediaService } from './media.service';
 import { currentTenant } from '../lib/tenant';
+import { PRIORITY_TR, STATUS_TR } from '../lib/labels';
 import { attachmentService } from './attachment.service';
 import { getNotificationSettings } from '../lib/notification-settings';
 import { isWeekend, quietUntil } from '../lib/quiet-hours';
@@ -54,6 +55,7 @@ export function taskPayload(
     text = `📌 *Yeni Görev*\n\n*${cleanTitle}*\n`;
     if (cleanDescription) text += `${cleanDescription}\n`;
     text += `Öncelik: ${task.priority}\nBitiş: ${date}\nGörevliler: ${tags}\n`;
+    if (extra?.by) text += `✍️ Panodan ekleyen: ${extra.by}\n`;
     // Always include source message text so that if WAHA cannot quote natively (e.g. older message not in cache),
     // the source message context is guaranteed never to be lost.
     if (task.sourceMessage?.body) {
@@ -261,8 +263,45 @@ async function loadImage(id: unknown): Promise<RenderedImage | null> {
   return row && bytes ? { mimetype: row.mimeType, filename: row.fileName, data: bytes.toString('base64') } : null;
 }
 
+/**
+ * Edits made on a shared board, announced in the group. The job holds what the
+ * task looked like before the first edit; only fields that still differ when it
+ * is sent are listed, so edits that were undone send nothing.
+ */
+async function renderBoardUpdate(job: OutgoingJob) {
+  const payload = job.payload as any;
+  const before = payload.before || {};
+  const task = job.taskId ? await prisma.task.findUnique({ where: { id: job.taskId }, include: { assignees: { include: { contact: true } } } }) : null;
+  if (!task) return null;
+  const lines: string[] = [];
+  const mentions: string[] = [];
+  const tag = (contact: any) => { const r = contactResolver.resolveAssigneeMention(contact); if (r.jid) mentions.push(r.jid); return r.tag; };
+  const day = (d: Date | string | null) => d ? formatDateTR(new Date(d)) : 'belirtilmedi';
+  if (before.title !== undefined && before.title !== task.title) lines.push(`📝 *Başlık değişti* (önceki: ${contactResolver.formatMentionsToNamesSync(before.title)})`);
+  const beforeIds = new Set<string>((before.assignees || []).map((a: any) => a.contactId));
+  const nowIds = new Set(task.assignees.map(a => a.contactId));
+  const added = task.assignees.filter(a => !beforeIds.has(a.contactId));
+  const removed = (before.assignees || []).filter((a: any) => !nowIds.has(a.contactId));
+  if (added.length || removed.length) {
+    lines.push(`👥 *Görevliler:* ${task.assignees.map(a => tag(a.contact)).filter(Boolean).join(' ') || '—'}`);
+    if (added.length) lines.push(`   ➕ Eklenen: ${added.map(a => contactResolver.resolveAssigneeMention(a.contact).tag).join(' ')}`);
+    if (removed.length) lines.push(`   ➖ Çıkarılan: ${removed.map((a: any) => a.name).join(', ')}`);
+  }
+  const beforeDue = before.dueDate ? new Date(before.dueDate).toISOString().slice(0, 10) : null;
+  const nowDue = task.dueDate ? task.dueDate.toISOString().slice(0, 10) : null;
+  if (beforeDue !== nowDue) lines.push(`📅 *Bitiş:* ${day(task.dueDate)} (önceki: ${day(before.dueDate)})`);
+  if (before.priority && before.priority !== task.priority) lines.push(`⚡ *Öncelik:* ${PRIORITY_TR[task.priority]} (önceki: ${PRIORITY_TR[before.priority] || before.priority})`);
+  // Completing and reopening are announced by their own notices.
+  if (before.status && before.status !== task.status && task.status !== 'DONE' && before.status !== 'DONE') lines.push(`🔄 *Durum:* ${STATUS_TR[task.status]}`);
+  if (!lines.length) return null;
+  const url = await urlShortenerService.shortenUrl(`${process.env.APP_URL || 'http://localhost:3000'}/t/${task.id}`);
+  const text = `✏️ *Görev güncellendi*\n\n*${contactResolver.formatMentionsToNamesSync(task.title)}*\n${lines.join('\n')}\n\n✍️ Panodan: ${(payload.by || []).join(', ')}\n🔗 Görevi incele: ${url}`;
+  return { text, mentions: [...new Set(mentions)], replyTo: task.sourceMessageId || undefined, linkPreview: false };
+}
+
 export async function renderJob(job: OutgoingJob): Promise<{ text: string; mentions: string[]; replyTo?: string; linkPreview?: boolean; image?: RenderedImage } | null> {
   const payload = job.payload as any;
+  if (job.kind === 'TASK_BOARD_UPDATE') return renderBoardUpdate(job);
   if (job.kind === 'TASK_IMAGE') {
     // A picture whose file is gone has nothing left to send.
     const image = await loadImage(payload.imageId);

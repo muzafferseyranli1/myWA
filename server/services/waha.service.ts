@@ -139,6 +139,11 @@ export class WAHAService {
     await this.reconcile();
     return true;
   }
+  /** Removes the session and its WhatsApp link from WAHA; used when an account is deleted. */
+  public async deleteSession() {
+    try { await this.request(`${this.baseUrl}/api/sessions/${this.sessionName}`, { method: 'DELETE' }); }
+    catch (error) { if (!(error instanceof WAHAHttpError) || error.status !== 404) throw error; }
+  }
   public async stopSession() {
     // Persist intent before the network call so an outage cannot undo Disconnect.
     await prisma.connectionPreference.upsert({ where: { session: this.sessionName }, create: { session: this.sessionName, enabled: false }, update: { enabled: false } });

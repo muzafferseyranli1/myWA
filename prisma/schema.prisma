@@ -318,3 +318,19 @@ model TaskAttachment {
   @@index([taskId])
   @@map("task_attachments")
 }
+
+// A shared task board for one WhatsApp group: anyone with its password can
+// read and edit that group's tasks across every user's schema. Lives in the
+// main schema only; owner is the user whose account holds tasks added there.
+model SharedBoard {
+  id           String   @id @default(uuid())
+  slug         String   @unique
+  chatId       String   @map("chat_id")
+  title        String
+  passwordHash String   @map("password_hash")
+  ownerId      String   @map("owner_id")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  @@map("shared_boards")
+}

@@ -185,8 +185,17 @@ Hepsi `main` dalında, canlıda denendi ve kullanıcı bir sorun görmedi (görs
 - Kanban/görev kartlarında "🔄 Ahmet · 25 Eki" satırı.
 - Görevi olmayan (görevlisiz) görevlerde yalnızca "Görevi kapat" görünür.
 
+### 6.5c Ortak grup panosu (2 Kasım 2026)
+- Tenant izolasyonunun **tek bilinçli istisnası**: `shared_boards` (yalnızca ana şemada) bir WhatsApp grubunu (`chat_id`) şifreli bir panoya bağlar. Pano, o grubun **tüm kullanıcı şemalarındaki** görevlerini gösterir; başka sohbet okunmaz.
+- Sayfa: `/pano/<slug>` (Excel benzeri tablo, filtre, Excel'e aktarma). Giriş: ad + pano şifresi → yalnızca o panoya geçerli 30 günlük token (`purpose: 'board'`). Şifre değişince eski tokenlar geçersiz olur. 15 dk'da 10 hatalı deneme sınırı (Traefik'in eklediği son `X-Forwarded-For` adresiyle).
+- API: `server/routes/boards.ts` (`/api/boards/:slug/...`), mantık `server/services/board.service.ts`. Görevler `<tenantId>.<taskId>` referansıyla adreslenir.
+- Panodan eklenen görev, panoyu oluşturan yöneticinin şemasına yazılır; duyuruda "Panodan ekleyen" yazar. Mevcut bir görevdeki değişiklik, görevin sahibi olan hesabın WhatsApp'ından gider.
+- Düzenleme duyurusu (`TASK_BOARD_UPDATE`) 2 dakika bekler; o sürede aynı göreve yapılan düzenlemeler aynı iş içinde birleşir. Gönderimde yalnızca ilk düzenlemeden önceki halden farklı alanlar listelenir; geri alınan değişiklik mesaj göndermez. Tamamlama/yeniden açma kendi bildirimleriyle gider.
+- Yönetim: admin sayfası → "Ortak grup panoları" (oluştur, bağlantı kopyala, şifre değiştir, kapat). Aynı sayfada devre dışı hesaplar için **kalıcı silme** (WAHA oturumu + şema `DROP ... CASCADE` + kullanıcı); kullanıcı adının yazılmasıyla onaylanır.
+- Ayrıca: bir mesajdan birden fazla görev açılabilir (`20261028000000_tasks_per_message`).
+
 ### 6.6 Yeni migration'lar
-`20261001000000_per_assignee_completion`, `20261001010000_app_settings`, `20261002000000_task_attachments`, `20261019000000_assignee_commitment`. Konteyner açılırken `scripts/entrypoint.sh` → `migrate-safe.mjs` otomatik uygular; **hata olursa sessizce geçer**, bu yüzden her deploy sonrası Coolify Runtime Logs'ta `migrate` aratıp bakın.
+`20261001000000_per_assignee_completion`, `20261001010000_app_settings`, `20261002000000_task_attachments`, `20261019000000_assignee_commitment`, `20261028000000_tasks_per_message`, `20261102000000_shared_boards`. Konteyner açılırken `scripts/entrypoint.sh` → `migrate-safe.mjs` otomatik uygular; **hata olursa sessizce geçer**, bu yüzden her deploy sonrası Coolify Runtime Logs'ta `migrate` aratıp bakın.
 
 ---
 

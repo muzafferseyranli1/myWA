@@ -65,6 +65,7 @@ if (req.url === '/api/sendText') {
   app.use('/api/media',(await import('../server/routes/media')).default);
   app.use('/chats',(await import('../server/routes/chats')).default);
   app.use('/admin',(await import('../server/routes/admin')).default);
+  app.use('/boards',(await import('../server/routes/boards')).default);
   const api=http.createServer(app); const socketServer=new Server(api); setupSockets(socketServer);
   await new Promise<void>(r=>api.listen(0,'127.0.0.1',r));
   const base=`http://127.0.0.1:${(api.address() as any).port}`;
@@ -395,6 +396,82 @@ if (req.url === '/api/sendText') {
       const list=await (await fetch(base+'/admin/users',{headers:adminHeaders})).json();
       assert.ok(list.every((u:any)=>!('qr' in u)&&!('passwordHash' in u)&&!('tenantSchema' in u)));
       assert.equal((await fetch(base+'/admin/users/'+admin.id,{method:'PATCH',headers:adminHeaders,body:JSON.stringify({isActive:false})})).status,400);
+    });
+    await t.test('a shared board exposes one group across accounts, coalesces notices and exports Excel',async()=>{
+      const bcrypt=(await import('bcryptjs')).default;
+      const sys=tenantLib.systemDb();
+      const owner=await sys.user.create({data:{username:'board-owner',passwordHash:'!',displayName:'Board Owner',role:'ADMIN'}});
+      const ownerTenant=(await tenantLib.provisionTenant(owner.id))!;
+      const second=await sys.user.create({data:{username:'board-second',passwordHash:'!',displayName:'Second User',role:'USER'}});
+      const secondTenant=(await tenantLib.provisionTenant(second.id))!;
+      const group='board@g.us';
+      for(const tenant of [ownerTenant,secondTenant]) await tenantLib.runWithTenant(tenant,async()=>{
+        await prisma.chat.create({data:{id:group,name:'Board Group',isGroup:true}});
+        await prisma.chat.create({data:{id:'private@g.us',name:'Private',isGroup:true}});
+        for(const [id,name] of [['905551110001@c.us','Ayla'],['905551110002@c.us','Burak']]){
+          await prisma.contact.upsert({where:{id},create:{id,phoneNumber:id.split('@')[0],displayName:name},update:{}});
+          await prisma.groupParticipant.create({data:{chatId:group,contactId:id}});
+        }
+      });
+      const mine=await tenantLib.runWithTenant(ownerTenant,()=>taskService.createTask({chatId:group,title:'owner task',notifyOnCreate:false}));
+      const theirs=await tenantLib.runWithTenant(secondTenant,()=>taskService.createTask({chatId:group,title:'second task',notifyOnCreate:false,assigneeIds:['905551110001@c.us']}));
+      await tenantLib.runWithTenant(secondTenant,()=>taskService.createTask({chatId:'private@g.us',title:'private task',notifyOnCreate:false}));
+      const board=await sys.sharedBoard.create({data:{slug:'board-test',chatId:group,title:'Board',passwordHash:await bcrypt.hash('board-pass',10),ownerId:owner.id}});
+      const other=await sys.sharedBoard.create({data:{slug:'other-board',chatId:'private@g.us',title:'Other',passwordHash:await bcrypt.hash('other-pass',10),ownerId:owner.id}});
+      const login=(slug:string,password:string)=>fetch(base+`/boards/${slug}/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Ece',password})});
+      assert.equal((await login('board-test','wrong')).status,401);
+      assert.equal((await fetch(base+'/boards/board-test/tasks')).status,401);
+      const {token:boardToken}=await (await login('board-test','board-pass')).json();
+      const bh={Authorization:`Bearer ${boardToken}`,'Content-Type':'application/json'};
+      // A token opens only the board it was issued for.
+      assert.equal((await fetch(base+'/boards/other-board/tasks',{headers:bh})).status,401);
+      const rows=await (await fetch(base+'/boards/board-test/tasks',{headers:bh})).json();
+      assert.deepEqual(rows.map((r:any)=>r.title).sort(),['owner task','second task'],'both accounts, only this group');
+      const theirRef=`${secondTenant.id}.${theirs.id}`;
+      assert.equal(rows.find((r:any)=>r.title==='second task').ref,theirRef);
+      // Edits land in the schema that holds the task and become one delayed notice.
+      const patch=(body:any)=>fetch(base+`/boards/board-test/tasks/${encodeURIComponent(theirRef)}`,{method:'PATCH',headers:bh,body:JSON.stringify(body)});
+      assert.equal((await patch({assigneeIds:['905551110001@c.us','905551110002@c.us']})).status,200);
+      assert.equal((await patch({priority:'HIGH'})).status,200);
+      await tenantLib.runWithTenant(secondTenant,async()=>{
+        const jobs=await prisma.outgoingJob.findMany({where:{taskId:theirs.id,kind:'TASK_BOARD_UPDATE'}});
+        assert.equal(jobs.length,1,'edits within the window share one notice');
+        assert.ok(jobs[0].nextAttemptAt.getTime()>Date.now()+60_000,'the notice waits for more edits');
+        const text=(await delivery.renderJob(jobs[0]))!.text;
+        assert.match(text,/Görev güncellendi/); assert.match(text,/Eklenen/); assert.match(text,/Öncelik:\* Yüksek/); assert.match(text,/Panodan: Ece/);
+        // An edit that is undone before the notice goes out sends nothing.
+        await prisma.task.update({where:{id:theirs.id},data:{priority:'MEDIUM'}});
+        await prisma.taskAssignee.deleteMany({where:{taskId:theirs.id,contactId:'905551110002@c.us'}});
+        assert.equal(await delivery.renderJob(jobs[0]),null);
+        await prisma.outgoingJob.updateMany({where:{taskId:theirs.id},data:{status:'CANCELLED'}});
+      });
+      // Tasks never leave the board's group.
+      const privateRef=`${secondTenant.id}.${(await tenantLib.runWithTenant(secondTenant,()=>prisma.task.findFirstOrThrow({where:{chatId:'private@g.us'}}))).id}`;
+      assert.notEqual((await fetch(base+`/boards/board-test/tasks/${encodeURIComponent(privateRef)}`,{method:'PATCH',headers:bh,body:JSON.stringify({title:'leak'})})).status,200);
+      // New tasks belong to the owner and the notice names who added them.
+      const created=await fetch(base+'/boards/board-test/tasks',{method:'POST',headers:bh,body:JSON.stringify({title:'from board',assigneeIds:['905551110002@c.us'],priority:'URGENT'})});
+      assert.equal(created.status,201);
+      await tenantLib.runWithTenant(ownerTenant,async()=>{
+        const task=await prisma.task.findFirstOrThrow({where:{title:'from board'}});
+        assert.equal(task.chatId,group);
+        const notice=await prisma.outgoingJob.findFirstOrThrow({where:{taskId:task.id,kind:'TASK_CREATED'}});
+        assert.match((notice.payload as any).text,/Panodan ekleyen: Ece/);
+        await prisma.outgoingJob.updateMany({where:{taskId:task.id},data:{status:'CANCELLED'}});
+      });
+      const xlsx=await fetch(base+'/boards/board-test/export',{headers:bh});
+      assert.equal(xlsx.status,200); assert.match(xlsx.headers.get('content-type')||'',/spreadsheetml/);
+      assert.equal(Buffer.from(await xlsx.arrayBuffer()).subarray(0,2).toString(),'PK');
+      // Changing the password ends existing board sessions.
+      await sys.sharedBoard.update({where:{id:board.id},data:{passwordHash:await bcrypt.hash('new-pass',10)}});
+      assert.equal((await fetch(base+'/boards/board-test/tasks',{headers:bh})).status,401);
+      await sys.sharedBoard.deleteMany({where:{id:{in:[board.id,other.id]}}});
+      // Deleting an account: only when disabled, and its schema goes with it.
+      const adminHeaders={Authorization:`Bearer ${jwt.sign({id:owner.id,role:'ADMIN'},process.env.JWT_SECRET!)}`};
+      assert.equal((await fetch(base+'/admin/users/'+second.id,{method:'DELETE',headers:adminHeaders})).status,409);
+      await sys.user.update({where:{id:second.id},data:{isActive:false}}); await tenantLib.loadTenants();
+      assert.equal((await fetch(base+'/admin/users/'+second.id,{method:'DELETE',headers:adminHeaders})).status,200);
+      const left=await sys.$queryRawUnsafe<any[]>('SELECT 1 FROM information_schema.schemata WHERE schema_name=$1',secondTenant.schema);
+      assert.equal(left.length,0); assert.equal(await sys.user.count({where:{id:second.id}}),0);
     });
   } finally {
     socketServer.close(); await new Promise<void>(r=>api.close(()=>r()));

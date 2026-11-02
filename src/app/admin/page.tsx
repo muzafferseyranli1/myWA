@@ -1,9 +1,10 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, UserPlus, KeyRound, Power, RefreshCw, Moon } from 'lucide-react';
+import { ArrowLeft, UserPlus, KeyRound, Power, RefreshCw, Moon, Trash2, Table2, Copy } from 'lucide-react';
 
 type NotificationSettings = { enabled: boolean; quietStart: string; weekdayEnd: string; weekendEnd: string };
+type Board = { id: string; slug: string; title: string; chatId: string; chatName: string; isActive: boolean };
 type AdminUser = { id: string; username: string; displayName: string; role: string; isActive: boolean; provisioned: boolean; whatsapp: string | null; createdAt: string };
 
 function headers() { return { Authorization: 'Bearer ' + localStorage.getItem('mywa_token'), 'Content-Type': 'application/json' }; }
@@ -33,6 +34,9 @@ export default function AdminPage() {
   const passwordError = form.password && form.password.length < 8 ? 'En az 8 karakter olmalı' : '';
 
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [boardForm, setBoardForm] = useState({ chatId: '', title: '', password: '' });
   const saveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!settings) return;
@@ -49,6 +53,8 @@ export default function AdminPage() {
     try {
       const s = await fetch('/api/admin/settings', { headers: headers() });
       if (s.ok) setSettings(await s.json());
+      const b = await fetch('/api/admin/boards', { headers: headers() });
+      if (b.ok) setBoards(await b.json());
       const res = await fetch('/api/admin/users', { headers: headers() });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Kullanıcılar alınamadı');
       setUsers(await res.json());
@@ -89,6 +95,41 @@ export default function AdminPage() {
       setUsernameEdited(false);
       await load();
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  const remove = async (user: AdminUser) => {
+    if (window.prompt(`${user.username} kalıcı olarak silinecek: WhatsApp oturumu, tüm sohbetleri, mesajları ve görevleri. Bu işlem geri alınamaz.\n\nOnaylamak için kullanıcı adını yazın:`) !== user.username) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch('/api/admin/users/' + user.id, { method: 'DELETE', headers: headers() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Silinemedi');
+      setNotice(`${user.username} kalıcı olarak silindi.`); await load();
+    } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  };
+
+  const boardUrl = (b: Board) => `${window.location.origin}/pano/${b.slug}`;
+  const openBoardForm = async () => {
+    try { const res = await fetch('/api/admin/board-chats', { headers: headers() }); if (res.ok) setGroups(await res.json()); } catch {}
+  };
+  const createBoard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch('/api/admin/boards', { method: 'POST', headers: headers(), body: JSON.stringify(boardForm) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Pano oluşturulamadı');
+      setNotice(`Pano oluşturuldu: ${boardUrl(data)}`); setBoardForm({ chatId: '', title: '', password: '' }); setGroups([]); await load();
+    } catch (err: any) { setError(err.message); } finally { setBusy(false); }
+  };
+  const updateBoard = async (b: Board, body: Record<string, unknown>, done: string) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const res = await fetch('/api/admin/boards/' + b.id, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Güncellenemedi');
+      setNotice(done); await load();
+    } catch (err: any) { setError(err.message); } finally { setBusy(false); }
   };
 
   const resetPassword = (user: AdminUser) => {
@@ -148,6 +189,32 @@ export default function AdminPage() {
           </form>
         )}
 
+        <section className="rounded-xl border border-[#e9edef] bg-white p-4">
+          <h2 className="mb-1 flex items-center gap-2 text-[14px] font-semibold"><Table2 size={17} /> Ortak grup panoları</h2>
+          <p className="mb-3 text-[12px] leading-5 text-[#667781]">Bir panonun bağlantısını ve şifresini bilen herkes, o gruptaki tüm kullanıcıların görevlerini görür, düzenler ve yeni görev ekler. Değişiklikler gruba duyurulur. Diğer sohbetler görünmez.</p>
+          <div className="space-y-2">
+            {boards.map(b => (
+              <div key={b.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#e9edef] px-3 py-2 text-[13px]">
+                <div className="min-w-0 flex-1"><div className="font-medium">{b.title} {!b.isActive && <span className="text-[#667781]">(kapalı)</span>}</div><div className="truncate text-[12px] text-[#667781]">{b.chatName} · {boardUrl(b)}</div></div>
+                <button onClick={() => { void navigator.clipboard?.writeText(boardUrl(b)); setNotice('Pano bağlantısı kopyalandı.'); }} title="Bağlantıyı kopyala" aria-label="Bağlantıyı kopyala" className="rounded-full p-2 text-[#54656f] hover:bg-[#e9edef]"><Copy size={15} /></button>
+                <button disabled={busy} onClick={() => { const password = window.prompt('Yeni pano şifresi (en az 6 karakter). Eski şifreyle açık oturumlar kapanır:'); if (password) void updateBoard(b, { password }, 'Pano şifresi değiştirildi.'); }} title="Şifreyi değiştir" aria-label="Şifreyi değiştir" className="rounded-full p-2 text-[#54656f] hover:bg-[#e9edef]"><KeyRound size={15} /></button>
+                <button disabled={busy} onClick={() => void updateBoard(b, { isActive: !b.isActive }, b.isActive ? 'Pano kapatıldı.' : 'Pano açıldı.')} title={b.isActive ? 'Panoyu kapat' : 'Panoyu aç'} aria-label={b.isActive ? 'Panoyu kapat' : 'Panoyu aç'} className={'rounded-full p-2 hover:bg-[#e9edef] ' + (b.isActive ? 'text-red-600' : 'text-[#008069]')}><Power size={15} /></button>
+              </div>
+            ))}
+          </div>
+          {groups.length ? (
+            <form onSubmit={createBoard} className="mt-3 grid gap-3 sm:grid-cols-3">
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-[#54656f]">WhatsApp grubu</span>
+                <select required className={input} value={boardForm.chatId} onChange={e => setBoardForm({ ...boardForm, chatId: e.target.value, title: boardForm.title || (groups.find(g => g.id === e.target.value)?.name || '') })}>
+                  <option value="">Grup seçin…</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-[#54656f]">Pano adı</span><input className={input} value={boardForm.title} onChange={e => setBoardForm({ ...boardForm, title: e.target.value })} /></label>
+              <label className="block"><span className="mb-1 block text-[12px] font-medium text-[#54656f]">Pano şifresi</span><input required minLength={6} type="password" autoComplete="new-password" className={input} value={boardForm.password} onChange={e => setBoardForm({ ...boardForm, password: e.target.value })} /></label>
+              <div className="flex gap-2 sm:col-span-3"><button disabled={busy} className="rounded-lg bg-[#00a884] px-4 py-2 text-[14px] font-medium text-white disabled:opacity-50">Panoyu oluştur</button><button type="button" onClick={() => setGroups([])} className="rounded-lg px-4 py-2 text-[14px] text-[#54656f]">Vazgeç</button></div>
+            </form>
+          ) : <button onClick={() => void openBoardForm()} className="mt-3 rounded-lg border border-[#00a884] px-3 py-1.5 text-[13px] text-[#008069]">+ Yeni pano</button>}
+        </section>
+
         <div className="overflow-x-auto rounded-xl border border-[#e9edef] bg-white">
           <table className="w-full text-left text-[13px]">
             <thead className="border-b border-[#e9edef] text-[#667781]">
@@ -163,6 +230,7 @@ export default function AdminPage() {
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     {user.isActive && !user.provisioned && <button disabled={busy} onClick={() => void update(user.id, {}, "Hesap hazırlandı. Kullanıcı boş bir alanla başlar ve kendi WhatsApp'ını bağlar.")} className="mr-1 rounded-lg border border-[#00a884] px-2 py-1 text-[12px] text-[#008069]">Hazırla</button>}
                     <button disabled={busy} onClick={() => resetPassword(user)} title="Şifre sıfırla" aria-label="Şifre sıfırla" className="rounded-full p-2 text-[#54656f] hover:bg-[#e9edef]"><KeyRound size={16} /></button>
+                    {!user.isActive && user.role !== 'ADMIN' && <button disabled={busy} onClick={() => void remove(user)} title="Kalıcı olarak sil" aria-label="Kalıcı olarak sil" className="rounded-full p-2 text-red-600 hover:bg-red-50"><Trash2 size={16} /></button>}
                     {user.id !== me && <button disabled={busy} onClick={() => toggle(user)} title={user.isActive ? 'Devre dışı bırak' : 'Etkinleştir'} aria-label={user.isActive ? 'Devre dışı bırak' : 'Etkinleştir'} className={'rounded-full p-2 hover:bg-[#e9edef] ' + (user.isActive ? 'text-red-600' : 'text-[#008069]')}><Power size={16} /></button>}
                   </td>
                 </tr>

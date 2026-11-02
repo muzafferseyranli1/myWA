@@ -10,6 +10,7 @@ import whatsappWebhookRoutes from './routes/whatsapp-webhook';
 import notificationsRoutes from './routes/notifications';
 import mediaRoutes from './routes/media';
 import adminRoutes from './routes/admin';
+import boardRoutes from './routes/boards';
 import { setupSockets } from './sockets';
 import { wahaService } from './services/waha.service';
 import { prisma } from './lib/prisma';
@@ -80,6 +81,7 @@ app.prepare().then(async () => {
   server.use('/api/notifications', notificationsRoutes);
   server.use('/api/media', mediaRoutes);
   server.use('/api/admin', adminRoutes);
+  server.use('/api/boards', boardRoutes);
   setupSockets(io);
   await startWorkers();
   server.get('/ready', async (_req, res) => {
